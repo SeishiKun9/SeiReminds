@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../../../domain/models/schedule_models.dart';
+import '../../../core/app_routes.dart';
 import '../../../core/app_theme.dart';
 import '../../canvas/view_models/canvas_settings_view_model.dart';
 import '../view_models/schedule_view_model.dart';
 import 'alarm_setup_sheet.dart';
 import 'event_schedule_form_page.dart';
-import 'settings_page.dart';
 import 'subject_schedule_form_page.dart';
 
 class ScheduleHomePage extends StatefulWidget {
@@ -136,14 +136,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
   }
 
   void _openSettings() {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => SettingsPage(
-          viewModel: widget.viewModel,
-          canvasViewModel: widget.canvasViewModel,
-        ),
-      ),
-    );
+    Navigator.of(context).pushNamed(AppRoutes.settings);
   }
 
   @override

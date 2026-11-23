@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/app_routes.dart';
+import '../../auth/view_models/auth_view_model.dart';
 import '../../canvas/view_models/canvas_settings_view_model.dart';
-import '../../canvas/views/canvas_settings_page.dart';
 import '../view_models/schedule_view_model.dart';
 import 'alarm_setup_sheet.dart';
 
@@ -10,10 +11,12 @@ class SettingsPage extends StatefulWidget {
     super.key,
     required this.viewModel,
     this.canvasViewModel,
+    this.authViewModel,
   });
 
   final ScheduleViewModel viewModel;
   final CanvasSettingsViewModel? canvasViewModel;
+  final AuthViewModel? authViewModel;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -121,6 +124,37 @@ class _SettingsPageState extends State<SettingsPage> {
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
             children: <Widget>[
+              if (widget.authViewModel != null) ...<Widget>[
+                ListenableBuilder(
+                  listenable: widget.authViewModel!,
+                  builder: (context, _) {
+                    final authVm = widget.authViewModel!;
+                    final user = authVm.currentUser;
+                    return Card(
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: theme.colorScheme.primaryContainer,
+                          child: const Icon(Icons.person_outline),
+                        ),
+                        title: Text(
+                          user?.label ?? 'Signed Out',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          user?.email ?? 'Supabase Auth',
+                        ),
+                        trailing: TextButton.icon(
+                          key: const Key('sign_out_button'),
+                          onPressed: authVm.isBusy ? null : authVm.signOut,
+                          icon: const Icon(Icons.logout, size: 18),
+                          label: const Text('Sign Out'),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+              ],
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(14),
@@ -188,12 +222,8 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () {
-                          Navigator.of(context).push<void>(
-                            MaterialPageRoute<void>(
-                              builder: (_) =>
-                                  CanvasSettingsPage(viewModel: cvm),
-                            ),
-                          );
+                          Navigator.of(context)
+                              .pushNamed(AppRoutes.canvasSettings);
                         },
                       ),
                     );
