@@ -1,87 +1,126 @@
 import '../../domain/models/schedule_models.dart';
 import '../services/alarm_service.dart';
-import '../services/local_schedule_storage.dart';
+import '../services/sqlite_database_service.dart';
 
-class ScheduleSyncResult {
-  const ScheduleSyncResult({
+class ScheduleDataSnapshot {
+  const ScheduleDataSnapshot({
     required this.schedules,
+    required this.events,
+    required this.activeHistory,
+    required this.archivedHistory,
     this.alarmSyncWarning,
   });
 
   final List<SubjectSchedule> schedules;
+  final List<EventSchedule> events;
+  final List<HistoryEntry> activeHistory;
+  final List<HistoryEntry> archivedHistory;
   final String? alarmSyncWarning;
 }
 
-/// Single source of truth for offline schedules and native alarm syncing.
-// shortcut: offline local storage only; add remote sync adapter here when online backend is chosen.
+/// Single source of truth backed by local SQLite and native Android alarms.
+// shortcut: offline SQLite only; add remote sync adapter here when online backend is chosen.
 class ScheduleRepository {
   ScheduleRepository({
-    required this._storage,
+    required this._database,
     required this._alarmService,
   });
 
-  final ScheduleStorage _storage;
+  final SqliteScheduleDatabase _database;
   final AlarmService _alarmService;
 
-  Future<ScheduleSyncResult> loadAndSync() async {
-    final schedules = await _storage.readAll();
-    final warning = await _syncAlarmsSafely(schedules);
-    return ScheduleSyncResult(
-      schedules: schedules,
+  Future<ScheduleDataSnapshot> loadAllAndSync() async {
+    final schedules = await _database.loadSchedules();
+    final events = await _database.loadEvents();
+    final activeHistory = await _database.loadHistory(archivedOnly: false);
+    final archivedHistory = await _database.loadHistory(archivedOnly: true);
+    final warning = await _syncAlarmsSafely(schedules, events);
+    return ScheduleDataSnapshot(
+      schedules: List<SubjectSchedule>.unmodifiable(schedules),
+      events: List<EventSchedule>.unmodifiable(events),
+      activeHistory: List<HistoryEntry>.unmodifiable(activeHistory),
+      archivedHistory: List<HistoryEntry>.unmodifiable(archivedHistory),
       alarmSyncWarning: warning,
     );
   }
 
-  Future<ScheduleSyncResult> saveSchedule(
-    List<SubjectSchedule> current,
-    SubjectSchedule schedule,
-  ) async {
-    final next = List<SubjectSchedule>.of(current);
-    final existingIndex = next.indexWhere((s) => s.id == schedule.id);
-    if (existingIndex >= 0) {
-      next[existingIndex] = schedule;
-    } else {
-      next.add(schedule);
-    }
-    await _storage.writeAll(next);
-    final warning = await _syncAlarmsSafely(next);
-    return ScheduleSyncResult(
-      schedules: List<SubjectSchedule>.unmodifiable(next),
-      alarmSyncWarning: warning,
-    );
+  Future<ScheduleDataSnapshot> saveSchedule(
+    SubjectSchedule schedule, {
+    required bool isNew,
+  }) async {
+    await _database.upsertSchedule(schedule, isNew: isNew);
+    return loadAllAndSync();
   }
 
-  Future<ScheduleSyncResult> deleteSchedule(
-    List<SubjectSchedule> current,
-    String id,
-  ) async {
-    final next = current.where((s) => s.id != id).toList();
-    await _storage.writeAll(next);
-    final warning = await _syncAlarmsSafely(next);
-    return ScheduleSyncResult(
-      schedules: List<SubjectSchedule>.unmodifiable(next),
-      alarmSyncWarning: warning,
+  Future<ScheduleDataSnapshot> deleteSchedule(
+    String id, {
+    required bool confirmedFromSchedule,
+  }) async {
+    await _database.deleteSchedule(
+      id,
+      confirmedFromSchedule: confirmedFromSchedule,
     );
+    return loadAllAndSync();
   }
 
-  Future<ScheduleSyncResult> toggleReminder(
-    List<SubjectSchedule> current,
+  Future<ScheduleDataSnapshot> toggleScheduleReminder(
     String id,
     bool enabled,
   ) async {
-    final next = current
-        .map((s) => s.id == id ? s.copyWith(reminderEnabled: enabled) : s)
-        .toList();
-    await _storage.writeAll(next);
-    final warning = await _syncAlarmsSafely(next);
-    return ScheduleSyncResult(
-      schedules: List<SubjectSchedule>.unmodifiable(next),
-      alarmSyncWarning: warning,
-    );
+    await _database.toggleScheduleReminder(id, enabled);
+    return loadAllAndSync();
   }
 
-  Future<String?> resyncAlarms(List<SubjectSchedule> current) {
-    return _syncAlarmsSafely(current);
+  Future<ScheduleDataSnapshot> saveEvent(
+    EventSchedule event, {
+    required bool isNew,
+  }) async {
+    final schedules = await _database.loadSchedules();
+    final affected = affectedSessionsForEvent(event, schedules);
+    await _database.upsertEvent(
+      event,
+      isNew: isNew,
+      affectedSessions: affected,
+    );
+    return loadAllAndSync();
+  }
+
+  Future<ScheduleDataSnapshot> deleteEvent(String id) async {
+    await _database.deleteEvent(id);
+    return loadAllAndSync();
+  }
+
+  Future<ScheduleDataSnapshot> toggleEventReminder(
+    String id,
+    bool enabled,
+  ) async {
+    await _database.toggleEventReminder(id, enabled);
+    return loadAllAndSync();
+  }
+
+  Future<ScheduleDataSnapshot> clearHistory() async {
+    await _database.clearHistory();
+    return loadAllAndSync();
+  }
+
+  Future<ScheduleDataSnapshot> restoreArchivedHistory() async {
+    await _database.restoreArchivedHistory();
+    return loadAllAndSync();
+  }
+
+  Future<ScheduleDataSnapshot> permanentlyClearHistory({
+    required bool confirmedPermanent,
+  }) async {
+    await _database.permanentlyClearHistory(
+      confirmedPermanent: confirmedPermanent,
+    );
+    return loadAllAndSync();
+  }
+
+  Future<String?> resyncAlarms() async {
+    final schedules = await _database.loadSchedules();
+    final events = await _database.loadEvents();
+    return _syncAlarmsSafely(schedules, events);
   }
 
   Future<AlarmPermissionStatus> getPermissionStatus() =>
@@ -102,12 +141,19 @@ class ScheduleRepository {
 
   Future<void> stopActiveAlarm() => _alarmService.stopActiveAlarm();
 
-  Future<String?> _syncAlarmsSafely(List<SubjectSchedule> schedules) async {
+  Future<void> close() => _database.close();
+
+  Future<String?> _syncAlarmsSafely(
+    List<SubjectSchedule> schedules,
+    List<EventSchedule> events,
+  ) async {
     try {
-      await _alarmService.syncAlarms(buildAlarmPayloads(schedules));
+      await _alarmService.syncAlarms(
+        buildAlarmPayloads(schedules, events: events),
+      );
       return null;
     } catch (e) {
-      return 'Schedule saved offline, but alarm sync failed: $e';
+      return 'Saved in SQLite, but alarm sync failed: $e';
     }
   }
 }

@@ -17,6 +17,15 @@ class ScheduleViewModel extends ChangeNotifier {
   List<SubjectSchedule> _schedules = const <SubjectSchedule>[];
   List<SubjectSchedule> get schedules => _schedules;
 
+  List<EventSchedule> _events = const <EventSchedule>[];
+  List<EventSchedule> get events => _events;
+
+  List<HistoryEntry> _activeHistory = const <HistoryEntry>[];
+  List<HistoryEntry> get activeHistory => _activeHistory;
+
+  List<HistoryEntry> _archivedHistory = const <HistoryEntry>[];
+  List<HistoryEntry> get archivedHistory => _archivedHistory;
+
   int _selectedWeekday;
   int get selectedWeekday => _selectedWeekday;
 
@@ -36,10 +45,26 @@ class ScheduleViewModel extends ChangeNotifier {
   List<DaySessionItem> get selectedDaySessions =>
       sessionsForWeekday(_schedules, _selectedWeekday);
 
+  List<EventSchedule> get selectedDayEvents =>
+      eventsForWeekday(_events, _selectedWeekday);
+
   int sessionCountForDay(int weekday) =>
       sessionsForWeekday(_schedules, weekday).length;
 
-  int get totalActiveAlarmCount => buildAlarmPayloads(_schedules).length;
+  int eventCountForDay(int weekday) =>
+      eventsForWeekday(_events, weekday).length;
+
+  int get totalActiveAlarmCount =>
+      buildAlarmPayloads(_schedules, events: _events).length;
+
+  List<EventSchedule> conflictingEventsFor(DaySessionItem item) =>
+      conflictingEventsForSession(_events, item.weekday, item.session);
+
+  List<DaySessionItem> affectedSessionsForDayEvent(
+    EventSchedule event,
+    int weekday,
+  ) =>
+      affectedSessionsForEventOnDay(event, _schedules, weekday);
 
   List<String> get knownSubjects {
     final names = _schedules.map((s) => s.subject).toSet().toList()
@@ -54,18 +79,26 @@ class ScheduleViewModel extends ChangeNotifier {
     return DateTime.monday;
   }
 
+  void _applySnapshot(ScheduleDataSnapshot snapshot) {
+    _schedules = snapshot.schedules;
+    _events = snapshot.events;
+    _activeHistory = snapshot.activeHistory;
+    _archivedHistory = snapshot.archivedHistory;
+    _bannerMessage = snapshot.alarmSyncWarning;
+    _errorMessage = null;
+  }
+
   Future<void> initialize() async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      final result = await _repository.loadAndSync();
-      _schedules = List<SubjectSchedule>.unmodifiable(result.schedules);
-      _bannerMessage = result.alarmSyncWarning;
+      final snapshot = await _repository.loadAllAndSync();
+      _applySnapshot(snapshot);
       _permissionStatus = await _repository.getPermissionStatus();
     } catch (e) {
-      _errorMessage = 'Could not load offline schedule: $e';
+      _errorMessage = 'Could not load offline SQLite database: $e';
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -87,10 +120,9 @@ class ScheduleViewModel extends ChangeNotifier {
 
   Future<bool> saveSchedule(SubjectSchedule schedule) async {
     try {
-      final result = await _repository.saveSchedule(_schedules, schedule);
-      _schedules = result.schedules;
-      _errorMessage = null;
-      _bannerMessage = result.alarmSyncWarning;
+      final isNew = !_schedules.any((s) => s.id == schedule.id);
+      final snapshot = await _repository.saveSchedule(schedule, isNew: isNew);
+      _applySnapshot(snapshot);
       notifyListeners();
       return true;
     } catch (e) {
@@ -100,11 +132,13 @@ class ScheduleViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> deleteSchedule(String id) async {
+  Future<void> deleteScheduleFromScheduleScreen(String id) async {
     try {
-      final result = await _repository.deleteSchedule(_schedules, id);
-      _schedules = result.schedules;
-      _bannerMessage = result.alarmSyncWarning;
+      final snapshot = await _repository.deleteSchedule(
+        id,
+        confirmedFromSchedule: true,
+      );
+      _applySnapshot(snapshot);
       notifyListeners();
     } catch (e) {
       _bannerMessage = 'Failed to delete schedule: $e';
@@ -114,13 +148,90 @@ class ScheduleViewModel extends ChangeNotifier {
 
   Future<void> toggleReminder(String id, bool enabled) async {
     try {
-      final result = await _repository.toggleReminder(_schedules, id, enabled);
-      _schedules = result.schedules;
-      _bannerMessage = result.alarmSyncWarning;
+      final snapshot = await _repository.toggleScheduleReminder(id, enabled);
+      _applySnapshot(snapshot);
       notifyListeners();
     } catch (e) {
       _bannerMessage = 'Failed to update reminder: $e';
       notifyListeners();
+    }
+  }
+
+  Future<List<DaySessionItem>?> saveEvent(EventSchedule event) async {
+    try {
+      final isNew = !_events.any((e) => e.id == event.id);
+      final affected = affectedSessionsForEvent(event, _schedules);
+      final snapshot = await _repository.saveEvent(event, isNew: isNew);
+      _applySnapshot(snapshot);
+      notifyListeners();
+      return affected;
+    } catch (e) {
+      _bannerMessage = 'Failed to save event: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<void> deleteEvent(String id) async {
+    try {
+      final snapshot = await _repository.deleteEvent(id);
+      _applySnapshot(snapshot);
+      notifyListeners();
+    } catch (e) {
+      _bannerMessage = 'Failed to delete event: $e';
+      notifyListeners();
+    }
+  }
+
+  Future<void> toggleEventReminder(String id, bool enabled) async {
+    try {
+      final snapshot = await _repository.toggleEventReminder(id, enabled);
+      _applySnapshot(snapshot);
+      notifyListeners();
+    } catch (e) {
+      _bannerMessage = 'Failed to update event reminder: $e';
+      notifyListeners();
+    }
+  }
+
+  Future<bool> clearHistory() async {
+    try {
+      final snapshot = await _repository.clearHistory();
+      _applySnapshot(snapshot);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _bannerMessage = 'Could not clear history: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> restoreArchivedHistory() async {
+    try {
+      final snapshot = await _repository.restoreArchivedHistory();
+      _applySnapshot(snapshot);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _bannerMessage = 'Could not restore history: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> permanentlyClearHistory() async {
+    try {
+      final snapshot = await _repository.permanentlyClearHistory(
+        confirmedPermanent: true,
+      );
+      _applySnapshot(snapshot);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _bannerMessage = 'Could not permanently clear history: $e';
+      notifyListeners();
+      return false;
     }
   }
 
@@ -132,26 +243,18 @@ class ScheduleViewModel extends ChangeNotifier {
   Future<void> requestNotificationPermission() async {
     await _repository.requestNotificationPermission();
     await refreshPermissions();
-    await _repository.resyncAlarms(_schedules);
+    await _repository.resyncAlarms();
   }
 
-  Future<void> openExactAlarmSettings() async {
-    await _repository.openExactAlarmSettings();
-  }
+  Future<void> openExactAlarmSettings() =>
+      _repository.openExactAlarmSettings();
 
-  Future<void> openDndSettings() async {
-    await _repository.openDndSettings();
-  }
+  Future<void> openDndSettings() => _repository.openDndSettings();
 
-  Future<void> openBatteryOptimizationSettings() async {
-    await _repository.openBatteryOptimizationSettings();
-  }
+  Future<void> openBatteryOptimizationSettings() =>
+      _repository.openBatteryOptimizationSettings();
 
-  Future<void> triggerTestAlarm() async {
-    await _repository.triggerTestAlarm();
-  }
+  Future<void> triggerTestAlarm() => _repository.triggerTestAlarm();
 
-  Future<void> stopActiveAlarm() async {
-    await _repository.stopActiveAlarm();
-  }
+  Future<void> stopActiveAlarm() => _repository.stopActiveAlarm();
 }

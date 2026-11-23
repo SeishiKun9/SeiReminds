@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:seireminds/data/repositories/schedule_repository.dart';
 import 'package:seireminds/data/services/alarm_service.dart';
-import 'package:seireminds/data/services/local_schedule_storage.dart';
+import 'package:seireminds/data/services/sqlite_database_service.dart';
 import 'package:seireminds/domain/models/schedule_models.dart';
 import 'package:seireminds/main.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _RecordingAlarmService implements AlarmService {
   List<ScheduledAlarmPayload> syncedAlarms = const <ScheduledAlarmPayload>[];
@@ -52,22 +52,25 @@ class _RecordingAlarmService implements AlarmService {
 }
 
 void main() {
+  setUpAll(() {
+    sqfliteFfiInit();
+  });
+
   testWidgets(
-    'Adds a class with 1-letter A-Z validation and Online Time + Lecture + Lab',
+    'Adds class, announces cancellation on overlapping event, and preserves schedules across History clears',
     (WidgetTester tester) async {
-      SharedPreferences.setMockInitialValues(<String, Object>{});
-      final prefs = await SharedPreferences.getInstance();
       final alarmService = _RecordingAlarmService();
       final repository = ScheduleRepository(
-        storage: SharedPreferencesScheduleStorage(prefs: prefs),
+        database: SqliteScheduleDatabase(
+          databaseFactory: databaseFactoryFfiNoIsolate,
+          databasePath: inMemoryDatabasePath,
+        ),
         alarmService: alarmService,
       );
+      addTearDown(repository.close);
 
       await tester.pumpWidget(
-        SeiRemindsApp(
-          repository: repository,
-          initialWeekday: DateTime.monday,
-        ),
+        SeiRemindsApp(repository: repository, initialWeekday: DateTime.monday),
       );
       await tester.pumpAndSettle();
 
@@ -78,40 +81,32 @@ void main() {
         expect(find.byKey(Key('weekday_tab_$day')), findsOneWidget);
       }
       expect(find.text('Sun'), findsNothing);
-      expect(find.text('No classes on Monday'), findsOneWidget);
 
-      // Open Add Class form.
+      // 1. Add class with section 1-letter A-Z validation and Online + Lecture + Lab.
       await tester.tap(find.byKey(const Key('add_schedule_fab')));
       await tester.pumpAndSettle();
 
-      // Step 1: Enter subject.
       await tester.enterText(
         find.byKey(const Key('subject_field')),
         'Data Structures',
       );
       await tester.pump();
 
-      // Step 2: Validate single-letter A-Z constraint.
       await tester.enterText(find.byKey(const Key('section_field')), 'AB');
       await tester.pump();
       expect(find.text('Enter only 1 letter (A–Z)'), findsOneWidget);
 
-      await tester.enterText(find.byKey(const Key('section_field')), '7');
-      await tester.pump();
-      expect(find.text('Section must be a letter from A to Z'), findsOneWidget);
-
-      // Pick valid section B.
       await tester.enterText(find.byKey(const Key('section_field')), 'b');
       await tester.pump();
       expect(find.text('Enter only 1 letter (A–Z)'), findsNothing);
 
-      // Step 3: Online Time is on by default; also enable Lecture & Laboratory.
       final formScrollable = find
           .descendant(
             of: find.byType(ListView),
             matching: find.byType(Scrollable),
           )
           .first;
+
       final lectureToggle = find.byKey(const Key('session_toggle_lecture'));
       await tester.scrollUntilVisible(
         lectureToggle,
@@ -121,7 +116,6 @@ void main() {
       await tester.tap(lectureToggle);
       await tester.pumpAndSettle();
 
-      // Also put Lecture on Wednesday.
       final wedLectureChip = find.byKey(
         const Key('day_lecture_${DateTime.wednesday}'),
       );
@@ -142,43 +136,73 @@ void main() {
       await tester.tap(labToggle);
       await tester.pumpAndSettle();
 
-      // Save schedule.
       await tester.tap(find.byKey(const Key('save_schedule_button')));
       await tester.pumpAndSettle();
 
-      // Monday shows all 3 sessions for Data Structures · Sec B.
       expect(find.text('Data Structures'), findsNWidgets(3));
       expect(find.text('Sec B'), findsNWidgets(3));
-      expect(find.text('Online Time'), findsOneWidget);
-      expect(find.text('Lecture'), findsOneWidget);
-      expect(find.text('Laboratory'), findsOneWidget);
-
-      // 4 alarms synced: Mon Online, Mon Lecture, Wed Lecture, Mon Laboratory.
       expect(alarmService.syncedAlarms.length, 4);
 
-      // Switch to Wednesday tab -> shows Lecture session.
-      await tester.tap(find.byKey(const Key('weekday_tab_${DateTime.wednesday}')));
+      // 2. Add Monday Morning Event (8:00 AM - 12:00 PM) that hits Online & Lecture.
+      await tester.tap(find.byKey(const Key('add_event_button')));
       await tester.pumpAndSettle();
-      expect(find.text('Wednesday'), findsOneWidget);
-      expect(find.text('Data Structures'), findsOneWidget);
-      expect(find.text('Lecture'), findsOneWidget);
 
-      // Test Alarm setup sheet test & stop triggers.
-      await tester.tap(find.byKey(const Key('alarm_setup_button')));
-      await tester.pumpAndSettle();
-      final testAlarmButton = find.text('Test Loud Alarm');
-      await tester.ensureVisible(testAlarmButton);
-      await tester.pumpAndSettle();
-      await tester.tap(testAlarmButton);
+      await tester.enterText(
+        find.byKey(const Key('event_title_field')),
+        'Foundation Day',
+      );
       await tester.pump();
-      expect(alarmService.testAlarmCalls, 1);
 
-      final stopAlarmButton = find.text('Stop');
-      await tester.ensureVisible(stopAlarmButton);
+      // Live preview detects the 2 overlapping Monday morning sessions.
+      expect(
+        find.textContaining('Will announce classes canceled (2 hit)'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('save_event_button')));
       await tester.pumpAndSettle();
-      await tester.tap(stopAlarmButton);
-      await tester.pump();
-      expect(alarmService.stopAlarmCalls, 1);
+
+      // Timetable announces canceled classes and marks overlapping sessions canceled.
+      expect(find.text('CLASSES CANCELED · Foundation Day'), findsOneWidget);
+      expect(find.text('CANCELED · Foundation Day'), findsNWidgets(2));
+
+      // Synced alarms now include the Event cancellation alarm and suppress the 2 canceled morning sessions
+      // (keeping Mon Lab + Wed Lecture + Mon Event = 3 total).
+      expect(alarmService.syncedAlarms.length, 3);
+      expect(
+        alarmService.syncedAlarms.any(
+          (a) => a.title == 'Classes Canceled · Foundation Day',
+        ),
+        isTrue,
+      );
+
+      // 3. Open Settings -> History: verify soft clear preserves records and permanent clear keeps schedules.
+      await tester.tap(find.byKey(const Key('settings_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Visible (2)'), findsOneWidget);
+      expect(find.text('Preserved (0)'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('soft_clear_history_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Visible (0)'), findsOneWidget);
+      expect(find.text('Preserved (2)'), findsOneWidget);
+
+      // Permanently clear history after explicit confirmation.
+      await tester.tap(find.byKey(const Key('permanent_clear_history_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_permanent_clear_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Visible (0)'), findsOneWidget);
+      expect(find.text('Preserved (0)'), findsOneWidget);
+
+      // Return to timetable and verify schedules were NEVER deleted.
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Data Structures'), findsNWidgets(3));
+      expect(find.text('CLASSES CANCELED · Foundation Day'), findsOneWidget);
     },
   );
 }

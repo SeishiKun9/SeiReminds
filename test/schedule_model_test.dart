@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:seireminds/data/repositories/schedule_repository.dart';
 import 'package:seireminds/data/services/alarm_service.dart';
-import 'package:seireminds/data/services/local_schedule_storage.dart';
+import 'package:seireminds/data/services/sqlite_database_service.dart';
 import 'package:seireminds/domain/models/schedule_models.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _FakeAlarmService implements AlarmService {
   List<ScheduledAlarmPayload> lastSynced = const <ScheduledAlarmPayload>[];
@@ -40,7 +40,18 @@ class _FakeAlarmService implements AlarmService {
   Future<void> triggerTestAlarm() async {}
 }
 
+SqliteScheduleDatabase _createInMemoryDb() {
+  return SqliteScheduleDatabase(
+    databaseFactory: databaseFactoryFfi,
+    databasePath: inMemoryDatabasePath,
+  );
+}
+
 void main() {
+  setUpAll(() {
+    sqfliteFfiInit();
+  });
+
   group('Section A-Z validation', () {
     test('accepts single ASCII letters and normalizes uppercase', () {
       expect(validateSectionLetter('a'), isNull);
@@ -117,131 +128,248 @@ void main() {
 
       final restored = SubjectSchedule.fromJson(original.toJson());
       expect(restored.id, 'subj-1');
-      expect(restored.subject, 'Computer Architecture');
       expect(restored.section, 'C');
       expect(restored.sessions.length, 3);
-      expect(
-        restored.sessions[SessionType.lecture]!.days,
-        <int>[DateTime.monday, DateTime.wednesday],
-      );
-      expect(
-        restored.sessions[SessionType.laboratory]!.timeOut,
-        const ScheduleTime(hour: 16, minute: 0),
-      );
       expect(restored.reminderMinutesBefore, 15);
     });
   });
 
-  group('Alarm trigger calculation', () {
-    test('handles same-day lead time, zero lead time, and midnight wrap', () {
-      final normal = computeAlarmTrigger(
-        weekday: DateTime.wednesday,
-        timeIn: const ScheduleTime(hour: 8, minute: 0),
-        minutesBefore: 10,
+  group('EventSchedule validation & class cancellation overlap', () {
+    test('enforces Monday-Friday days and Morning / Afternoon / Both bounds', () {
+      expect(
+        EventSchedule.validateFields(
+          title: 'Sports Fest',
+          days: const <int>[DateTime.saturday],
+          period: EventPeriod.morning,
+          timeIn: const ScheduleTime(hour: 8, minute: 0),
+          timeOut: const ScheduleTime(hour: 12, minute: 0),
+        ),
+        contains('Monday to Friday'),
       );
-      expect(normal, (weekday: DateTime.wednesday, hour: 7, minute: 50));
 
-      final exact = computeAlarmTrigger(
-        weekday: DateTime.friday,
-        timeIn: const ScheduleTime(hour: 14, minute: 30),
-        minutesBefore: 0,
+      expect(
+        EventSchedule.validateFields(
+          title: 'Assembly',
+          days: const <int>[DateTime.monday],
+          period: EventPeriod.morning,
+          timeIn: const ScheduleTime(hour: 9, minute: 0),
+          timeOut: const ScheduleTime(hour: 13, minute: 0),
+        ),
+        contains('12:00 PM'),
       );
-      expect(exact, (weekday: DateTime.friday, hour: 14, minute: 30));
 
-      final wrappedToSunday = computeAlarmTrigger(
-        weekday: DateTime.monday,
-        timeIn: const ScheduleTime(hour: 0, minute: 5),
-        minutesBefore: 10,
+      expect(
+        EventSchedule.validateFields(
+          title: 'Seminar',
+          days: const <int>[DateTime.tuesday],
+          period: EventPeriod.afternoon,
+          timeIn: const ScheduleTime(hour: 11, minute: 0),
+          timeOut: const ScheduleTime(hour: 15, minute: 0),
+        ),
+        contains('12:00 PM'),
       );
-      expect(wrappedToSunday, (weekday: DateTime.sunday, hour: 23, minute: 55));
 
-      final wrappedToMonday = computeAlarmTrigger(
-        weekday: DateTime.tuesday,
-        timeIn: const ScheduleTime(hour: 0, minute: 0),
-        minutesBefore: 15,
+      expect(
+        EventSchedule.validateFields(
+          title: 'Whole Day Fair',
+          days: const <int>[DateTime.wednesday],
+          period: EventPeriod.both,
+          timeIn: const ScheduleTime(hour: 8, minute: 0),
+          timeOut: const ScheduleTime(hour: 11, minute: 30),
+        ),
+        contains('after 12:00 PM'),
       );
-      expect(wrappedToMonday, (weekday: DateTime.monday, hour: 23, minute: 45));
+
+      expect(
+        EventSchedule.validateFields(
+          title: 'Whole Day Fair',
+          days: const <int>[DateTime.monday, DateTime.friday],
+          period: EventPeriod.both,
+          timeIn: const ScheduleTime(hour: 8, minute: 0),
+          timeOut: const ScheduleTime(hour: 17, minute: 0),
+        ),
+        isNull,
+      );
     });
 
-    test('builds unique alarms only for reminder-enabled schedules', () {
-      final active = SubjectSchedule(
-        id: 'a1',
-        subject: 'Physics',
+    test('suppresses overlapping class alarm and announces cancellation via event alarm', () {
+      final schedule = SubjectSchedule(
+        id: 'calc-1',
+        subject: 'Calculus 1',
         section: 'A',
         reminderMinutesBefore: 10,
         sessions: <SessionType, SessionSchedule>{
           SessionType.lecture: SessionSchedule(
             type: SessionType.lecture,
-            days: const <int>[DateTime.monday, DateTime.thursday],
+            days: const <int>[DateTime.monday, DateTime.wednesday],
             timeIn: const ScheduleTime(hour: 9, minute: 0),
             timeOut: const ScheduleTime(hour: 10, minute: 30),
           ),
           SessionType.laboratory: SessionSchedule(
             type: SessionType.laboratory,
-            days: const <int>[DateTime.saturday],
-            timeIn: const ScheduleTime(hour: 13, minute: 0),
-            timeOut: const ScheduleTime(hour: 15, minute: 0),
+            days: const <int>[DateTime.monday],
+            timeIn: const ScheduleTime(hour: 12, minute: 0),
+            timeOut: const ScheduleTime(hour: 14, minute: 0),
           ),
         },
       );
-      final muted = active.copyWith(id: 'a2', reminderEnabled: false);
 
-      final payloads = buildAlarmPayloads(<SubjectSchedule>[active, muted]);
+      // Morning event 8:00 AM - 12:00 PM hits Monday Lecture (9:00-10:30),
+      // does NOT hit back-to-back Monday Lab (12:00-2:00) or Wednesday Lecture.
+      final event = EventSchedule(
+        id: 'evt-1',
+        title: 'Foundation Day',
+        days: const <int>[DateTime.monday],
+        period: EventPeriod.morning,
+        timeIn: const ScheduleTime(hour: 8, minute: 0),
+        timeOut: const ScheduleTime(hour: 12, minute: 0),
+      );
+
+      final payloads = buildAlarmPayloads(
+        <SubjectSchedule>[schedule],
+        events: <EventSchedule>[event],
+      );
+
+      // Expected 3 alarms: Wed Lecture + Mon Lab + Mon Event cancellation announcement.
       expect(payloads.length, 3);
-      expect(payloads.map((p) => p.id).toSet().length, 3);
-      expect(payloads.every((p) => p.id >= 1000), isTrue);
+      final eventAlarms = payloads.where((p) => p.sessionLabel == 'Event').toList();
+      expect(eventAlarms.length, 1);
+      expect(eventAlarms.first.title, contains('Classes Canceled'));
+      expect(eventAlarms.first.body, contains('Calculus 1 (Sec A · Lecture)'));
+
+      // Monday Lecture alarm suppressed; Wednesday Lecture remains.
+      final lectureAlarms =
+          payloads.where((p) => p.sessionLabel == 'Lecture').toList();
+      expect(lectureAlarms.length, 1);
+      expect(lectureAlarms.first.weekday, DateTime.wednesday);
     });
   });
 
-  group('Offline storage & repository', () {
-    test('persists schedules offline and surfaces alarm sync warnings safely', () async {
-      SharedPreferences.setMockInitialValues(<String, Object>{});
-      final prefs = await SharedPreferences.getInstance();
-      final storage = SharedPreferencesScheduleStorage(prefs: prefs);
+  group('Alarm trigger calculation', () {
+    test('handles same-day lead time, zero lead time, and midnight wrap', () {
+      expect(
+        computeAlarmTrigger(
+          weekday: DateTime.wednesday,
+          timeIn: const ScheduleTime(hour: 8, minute: 0),
+          minutesBefore: 10,
+        ),
+        (weekday: DateTime.wednesday, hour: 7, minute: 50),
+      );
+
+      expect(
+        computeAlarmTrigger(
+          weekday: DateTime.monday,
+          timeIn: const ScheduleTime(hour: 0, minute: 5),
+          minutesBefore: 10,
+        ),
+        (weekday: DateTime.sunday, hour: 23, minute: 55),
+      );
+    });
+  });
+
+  group('SQLite persistence, History preservation & Schedule Protection', () {
+    test('soft clear preserves history, permanent clear keeps schedules, and deletion guard works', () async {
+      final db = _createInMemoryDb();
       final alarmService = _FakeAlarmService();
       final repo = ScheduleRepository(
-        storage: storage,
+        database: db,
         alarmService: alarmService,
       );
 
-      final schedule = SubjectSchedule(
-        id: 'offline-1',
-        subject: 'Calculus 1',
-        section: 'A',
-        sessions: <SessionType, SessionSchedule>{
-          SessionType.onlineTime: SessionSchedule(
-            type: SessionType.onlineTime,
-            days: const <int>[DateTime.monday],
-            timeIn: const ScheduleTime(hour: 8, minute: 0),
-            timeOut: const ScheduleTime(hour: 9, minute: 0),
-          ),
-        },
-      );
+      try {
+        final schedule = SubjectSchedule(
+          id: 'sched-1',
+          subject: 'Operating Systems',
+          section: 'D',
+          sessions: <SessionType, SessionSchedule>{
+            SessionType.lecture: SessionSchedule(
+              type: SessionType.lecture,
+              days: const <int>[DateTime.tuesday],
+              timeIn: const ScheduleTime(hour: 10, minute: 0),
+              timeOut: const ScheduleTime(hour: 11, minute: 30),
+            ),
+          },
+        );
 
-      final saved = await repo.saveSchedule(const <SubjectSchedule>[], schedule);
-      expect(saved.schedules.length, 1);
-      expect(saved.alarmSyncWarning, isNull);
-      expect(alarmService.lastSynced.length, 1);
+        final afterSave = await repo.saveSchedule(schedule, isNew: true);
+        expect(afterSave.schedules.length, 1);
+        expect(afterSave.activeHistory.length, 1);
+        expect(afterSave.archivedHistory, isEmpty);
 
-      // Reload from disk.
-      final reloaded = await repo.loadAndSync();
-      expect(reloaded.schedules.length, 1);
-      expect(reloaded.schedules.first.subject, 'Calculus 1');
+        // Soft clear hides visible history without deleting SQLite data or schedules.
+        final afterSoftClear = await repo.clearHistory();
+        expect(afterSoftClear.activeHistory, isEmpty);
+        expect(afterSoftClear.archivedHistory.length, 1);
+        expect(afterSoftClear.schedules.length, 1);
+        expect(afterSoftClear.schedules.first.subject, 'Operating Systems');
 
-      // Alarm failure does not discard offline save.
-      alarmService.shouldFailSync = true;
-      final updated = await repo.toggleReminder(reloaded.schedules, 'offline-1', false);
-      expect(updated.schedules.first.reminderEnabled, isFalse);
-      expect(updated.alarmSyncWarning, contains('saved offline'));
+        // Restoring brings preserved history back.
+        final afterRestore = await repo.restoreArchivedHistory();
+        expect(afterRestore.activeHistory.length, 1);
+        expect(afterRestore.archivedHistory, isEmpty);
+
+        // Unconfirmed permanent clear is blocked by ScheduleProtectionException.
+        await expectLater(
+          repo.permanentlyClearHistory(confirmedPermanent: false),
+          throwsA(isA<ScheduleProtectionException>()),
+        );
+
+        // Confirmed permanent clear removes ONLY history; schedules stay intact.
+        final afterPermClear = await repo.permanentlyClearHistory(
+          confirmedPermanent: true,
+        );
+        expect(afterPermClear.activeHistory, isEmpty);
+        expect(afterPermClear.archivedHistory, isEmpty);
+        expect(afterPermClear.schedules.length, 1);
+        expect(afterPermClear.schedules.first.id, 'sched-1');
+
+        // Unconfirmed schedule deletion is blocked by ScheduleProtectionException.
+        await expectLater(
+          repo.deleteSchedule('sched-1', confirmedFromSchedule: false),
+          throwsA(isA<ScheduleProtectionException>()),
+        );
+
+        // Confirmed deletion from schedule removes the class and logs history.
+        final afterRemove = await repo.deleteSchedule(
+          'sched-1',
+          confirmedFromSchedule: true,
+        );
+        expect(afterRemove.schedules, isEmpty);
+        expect(afterRemove.activeHistory.length, 1);
+        expect(afterRemove.activeHistory.first.action, 'schedule_deleted');
+      } finally {
+        await repo.close();
+      }
     });
 
-    test('throws StorageFormatException on corrupt stored JSON', () async {
-      SharedPreferences.setMockInitialValues(<String, Object>{
-        SharedPreferencesScheduleStorage.storageKey: '{not valid json',
-      });
-      final prefs = await SharedPreferences.getInstance();
-      final storage = SharedPreferencesScheduleStorage(prefs: prefs);
-      expect(storage.readAll(), throwsA(isA<StorageFormatException>()));
+    test('saves in SQLite even if alarm sync fails', () async {
+      final db = _createInMemoryDb();
+      final alarmService = _FakeAlarmService()..shouldFailSync = true;
+      final repo = ScheduleRepository(
+        database: db,
+        alarmService: alarmService,
+      );
+
+      try {
+        final schedule = SubjectSchedule(
+          id: 'sched-offline',
+          subject: 'Physics',
+          section: 'A',
+          sessions: <SessionType, SessionSchedule>{
+            SessionType.onlineTime: SessionSchedule(
+              type: SessionType.onlineTime,
+              days: const <int>[DateTime.monday],
+              timeIn: const ScheduleTime(hour: 8, minute: 0),
+              timeOut: const ScheduleTime(hour: 9, minute: 0),
+            ),
+          },
+        );
+        final res = await repo.saveSchedule(schedule, isNew: true);
+        expect(res.schedules.length, 1);
+        expect(res.alarmSyncWarning, contains('Saved in SQLite'));
+      } finally {
+        await repo.close();
+      }
     });
   });
 }

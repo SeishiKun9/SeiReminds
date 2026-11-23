@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'data/repositories/schedule_repository.dart';
 import 'data/services/alarm_service.dart';
-import 'data/services/local_schedule_storage.dart';
+import 'data/services/sqlite_database_service.dart';
 import 'ui/core/app_theme.dart';
 import 'ui/features/schedule/view_models/schedule_view_model.dart';
 import 'ui/features/schedule/views/schedule_home_page.dart';
@@ -10,7 +10,7 @@ import 'ui/features/schedule/views/schedule_home_page.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   final repository = ScheduleRepository(
-    storage: SharedPreferencesScheduleStorage(),
+    database: SqliteScheduleDatabase(),
     alarmService: MethodChannelAlarmService(),
   );
   runApp(SeiRemindsApp(repository: repository));

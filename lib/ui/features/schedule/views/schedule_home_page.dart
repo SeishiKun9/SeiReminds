@@ -4,6 +4,8 @@ import '../../../../domain/models/schedule_models.dart';
 import '../../../core/app_theme.dart';
 import '../view_models/schedule_view_model.dart';
 import 'alarm_setup_sheet.dart';
+import 'event_schedule_form_page.dart';
+import 'settings_page.dart';
 import 'subject_schedule_form_page.dart';
 
 class ScheduleHomePage extends StatefulWidget {
@@ -22,7 +24,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
     widget.viewModel.initialize();
   }
 
-  Future<void> _openForm({SubjectSchedule? existing}) async {
+  Future<void> _openClassForm({SubjectSchedule? existing}) async {
     final result = await Navigator.of(context).push<SubjectSchedule>(
       MaterialPageRoute<SubjectSchedule>(
         builder: (_) => SubjectScheduleFormPage(
@@ -40,19 +42,65 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '${result.subject} (Sec ${result.section}) saved offline.',
+          '${result.subject} (Sec ${result.section}) saved in SQLite.',
         ),
       ),
     );
   }
 
-  Future<void> _confirmDelete(SubjectSchedule schedule) async {
+  Future<void> _openEventForm({EventSchedule? existing}) async {
+    final result = await Navigator.of(context).push<EventSchedule>(
+      MaterialPageRoute<EventSchedule>(
+        builder: (_) => EventScheduleFormPage(
+          initialWeekday: widget.viewModel.selectedWeekday,
+          existingSchedules: widget.viewModel.schedules,
+          existingEvent: existing,
+        ),
+      ),
+    );
+
+    if (result == null) return;
+    final affected = await widget.viewModel.saveEvent(result);
+    if (!mounted || affected == null) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(buildCancellationAnnouncement(result, affected))),
+    );
+  }
+
+  Future<void> _confirmDeleteSchedule(SubjectSchedule schedule) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete class schedule?'),
+        title: const Text('Remove from schedule?'),
         content: Text(
-          'Remove ${schedule.subject} (Sec ${schedule.section}) and cancel its weekly reminders?',
+          'Remove ${schedule.subject} (Sec ${schedule.section}) from your timetable and cancel its weekly reminders?',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await widget.viewModel.deleteScheduleFromScheduleScreen(schedule.id);
+    }
+  }
+
+  Future<void> _confirmDeleteEvent(EventSchedule event) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete event schedule?'),
+        content: Text(
+          'Remove "${event.title}"? Overlapping classes will resume normal alarms.',
         ),
         actions: <Widget>[
           TextButton(
@@ -68,7 +116,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
     );
 
     if (confirmed == true) {
-      await widget.viewModel.deleteSchedule(schedule.id);
+      await widget.viewModel.deleteEvent(event.id);
     }
   }
 
@@ -81,6 +129,14 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
     );
   }
 
+  void _openSettings() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsPage(viewModel: widget.viewModel),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -88,6 +144,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
       listenable: widget.viewModel,
       builder: (context, _) {
         final vm = widget.viewModel;
+        final dayEvents = vm.selectedDayEvents;
         final daySessions = vm.selectedDaySessions;
 
         return Scaffold(
@@ -129,6 +186,12 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
                   child: const Icon(Icons.notifications_active_outlined),
                 ),
               ),
+              IconButton(
+                key: const Key('settings_button'),
+                tooltip: 'Settings & History',
+                onPressed: _openSettings,
+                icon: const Icon(Icons.settings_outlined),
+              ),
             ],
           ),
           body: vm.isLoading
@@ -138,8 +201,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
                     if (vm.permissionStatus.needsAttention)
                       _AlertStrip(
                         icon: Icons.warning_amber_rounded,
-                        message:
-                            'Grant alarm permissions so reminders bypass silent mode while unused.',
+                        message: 'Grant alarm permissions so reminders bypass silent mode while unused.',
                         actionLabel: 'Setup',
                         onAction: _openAlarmSetup,
                       ),
@@ -153,24 +215,37 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
                     _WeekdayStrip(
                       selectedWeekday: vm.selectedWeekday,
                       countForDay: vm.sessionCountForDay,
+                      eventCountForDay: vm.eventCountForDay,
                       onSelect: vm.selectWeekday,
                     ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
                       child: Row(
                         children: <Widget>[
-                          Text(
-                            weekdayFullLabel(vm.selectedWeekday),
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  weekdayFullLabel(vm.selectedWeekday),
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                Text(
+                                  '${daySessions.length} ${daySessions.length == 1 ? 'session' : 'sessions'} · ${dayEvents.length} ${dayEvents.length == 1 ? 'event' : 'events'} · ${vm.totalActiveAlarmCount} alarms',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const Spacer(),
-                          Text(
-                            '${daySessions.length} ${daySessions.length == 1 ? 'session' : 'sessions'} · ${vm.totalActiveAlarmCount} alarms',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
+                          FilledButton.tonalIcon(
+                            key: const Key('add_event_button'),
+                            onPressed: () => _openEventForm(),
+                            icon: const Icon(Icons.campaign_outlined, size: 18),
+                            label: const Text('Add Event'),
                           ),
                         ],
                       ),
@@ -189,43 +264,67 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
                                 ),
                               ),
                             )
-                          : daySessions.isEmpty
-                              ? _EmptyDayView(
-                                  weekday: vm.selectedWeekday,
-                                  onAddPressed: () => _openForm(),
-                                )
-                              : ListView.separated(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    16,
-                                    4,
-                                    16,
-                                    96,
-                                  ),
-                                  itemCount: daySessions.length,
-                                  separatorBuilder: (_, _) =>
-                                      const SizedBox(height: 10),
-                                  itemBuilder: (context, index) {
-                                    final item = daySessions[index];
-                                    return _SessionCard(
-                                      item: item,
+                          : (daySessions.isEmpty && dayEvents.isEmpty)
+                          ? _EmptyDayView(
+                              weekday: vm.selectedWeekday,
+                              onAddPressed: () => _openClassForm(),
+                            )
+                          : ListView(
+                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
+                              children: <Widget>[
+                                ...dayEvents.map((event) {
+                                  final affected = vm
+                                      .affectedSessionsForDayEvent(
+                                        event,
+                                        vm.selectedWeekday,
+                                      );
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 10),
+                                    child: _EventAnnouncementCard(
+                                      event: event,
+                                      affectedSessions: affected,
                                       onEdit: () =>
-                                          _openForm(existing: item.schedule),
+                                          _openEventForm(existing: event),
                                       onDelete: () =>
-                                          _confirmDelete(item.schedule),
+                                          _confirmDeleteEvent(event),
+                                      onToggleReminder: (enabled) =>
+                                          vm.toggleEventReminder(
+                                            event.id,
+                                            enabled,
+                                          ),
+                                    ),
+                                  );
+                                }),
+                                ...daySessions.map((item) {
+                                  final conflicts = vm.conflictingEventsFor(
+                                    item,
+                                  );
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 10),
+                                    child: _SessionCard(
+                                      item: item,
+                                      conflictingEvents: conflicts,
+                                      onEdit: () => _openClassForm(
+                                        existing: item.schedule,
+                                      ),
+                                      onDelete: () =>
+                                          _confirmDeleteSchedule(item.schedule),
                                       onToggleReminder: (enabled) =>
                                           vm.toggleReminder(
-                                        item.schedule.id,
-                                        enabled,
-                                      ),
-                                    );
-                                  },
-                                ),
+                                            item.schedule.id,
+                                            enabled,
+                                          ),
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
                     ),
                   ],
                 ),
           floatingActionButton: FloatingActionButton.extended(
             key: const Key('add_schedule_fab'),
-            onPressed: () => _openForm(),
+            onPressed: () => _openClassForm(),
             icon: const Icon(Icons.add),
             label: const Text('Add Class'),
           ),
@@ -235,15 +334,123 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
   }
 }
 
+class _EventAnnouncementCard extends StatelessWidget {
+  const _EventAnnouncementCard({
+    required this.event,
+    required this.affectedSessions,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onToggleReminder,
+  });
+
+  final EventSchedule event;
+  final List<DaySessionItem> affectedSessions;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final ValueChanged<bool> onToggleReminder;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasCancellation = affectedSessions.isNotEmpty;
+    final bg = hasCancellation
+        ? theme.colorScheme.errorContainer
+        : theme.colorScheme.tertiaryContainer;
+    final fg = hasCancellation
+        ? theme.colorScheme.onErrorContainer
+        : theme.colorScheme.onTertiaryContainer;
+
+    return Card(
+      color: bg,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onEdit,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Icon(hasCancellation ? Icons.campaign : Icons.event, color: fg),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      hasCancellation
+                          ? 'CLASSES CANCELED · ${event.title}'
+                          : 'EVENT · ${event.title}',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: fg,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${event.period.label} · ${event.formatTimeRange()}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: fg,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (hasCancellation) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Affected: ${affectedSessions.map((s) => s.shortSummary).join(', ')}',
+                        style: theme.textTheme.bodySmall?.copyWith(color: fg),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              PopupMenuButton<String>(
+                iconColor: fg,
+                tooltip: 'Event actions',
+                onSelected: (value) {
+                  if (value == 'edit') {
+                    onEdit();
+                  } else if (value == 'toggle') {
+                    onToggleReminder(!event.reminderEnabled);
+                  } else if (value == 'delete') {
+                    onDelete();
+                  }
+                },
+                itemBuilder: (_) => <PopupMenuEntry<String>>[
+                  const PopupMenuItem<String>(
+                    value: 'edit',
+                    child: Text('Edit event'),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'toggle',
+                    child: Text(
+                      event.reminderEnabled ? 'Mute alarm' : 'Enable alarm',
+                    ),
+                  ),
+                  const PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Text('Delete event'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _WeekdayStrip extends StatelessWidget {
   const _WeekdayStrip({
     required this.selectedWeekday,
     required this.countForDay,
+    required this.eventCountForDay,
     required this.onSelect,
   });
 
   final int selectedWeekday;
   final int Function(int weekday) countForDay;
+  final int Function(int weekday) eventCountForDay;
   final ValueChanged<int> onSelect;
 
   @override
@@ -255,13 +462,15 @@ class _WeekdayStrip extends StatelessWidget {
         children: kSchoolWeekdays.map((day) {
           final selected = day == selectedWeekday;
           final count = countForDay(day);
+          final hasEvent = eventCountForDay(day) > 0;
           return Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 3),
               child: Semantics(
                 button: true,
                 selected: selected,
-                label: '${weekdayFullLabel(day)}, $count classes',
+                label:
+                    '${weekdayFullLabel(day)}, $count classes${hasEvent ? ', has event' : ''}',
                 child: InkWell(
                   key: Key('weekday_tab_$day'),
                   onTap: () => onSelect(day),
@@ -280,15 +489,33 @@ class _WeekdayStrip extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        Text(
-                          weekdayShortLabel(day),
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: selected
-                                ? colorScheme.onPrimary
-                                : colorScheme.onSurface,
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: <Widget>[
+                            Text(
+                              weekdayShortLabel(day),
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: selected
+                                    ? colorScheme.onPrimary
+                                    : colorScheme.onSurface,
+                              ),
+                            ),
+                            if (hasEvent) ...<Widget>[
+                              const SizedBox(width: 3),
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: selected
+                                      ? colorScheme.onPrimary
+                                      : colorScheme.error,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         const SizedBox(height: 4),
                         Container(
@@ -329,12 +556,14 @@ class _WeekdayStrip extends StatelessWidget {
 class _SessionCard extends StatelessWidget {
   const _SessionCard({
     required this.item,
+    required this.conflictingEvents,
     required this.onEdit,
     required this.onDelete,
     required this.onToggleReminder,
   });
 
   final DaySessionItem item;
+  final List<EventSchedule> conflictingEvents;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<bool> onToggleReminder;
@@ -342,7 +571,10 @@ class _SessionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = AppTheme.sessionColor(item.session.type, theme.brightness);
+    final isCanceled = conflictingEvents.isNotEmpty;
+    final accent = isCanceled
+        ? theme.colorScheme.error
+        : AppTheme.sessionColor(item.session.type, theme.brightness);
     final schedule = item.schedule;
 
     return Card(
@@ -391,10 +623,13 @@ class _SessionCard extends StatelessWidget {
                                 Expanded(
                                   child: Text(
                                     schedule.subject,
-                                    style:
-                                        theme.textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                    ),
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          decoration: isCanceled
+                                              ? TextDecoration.lineThrough
+                                              : null,
+                                        ),
                                   ),
                                 ),
                                 Container(
@@ -445,39 +680,65 @@ class _SessionCard extends StatelessWidget {
                                         item.session.type.label,
                                         style: theme.textTheme.labelSmall
                                             ?.copyWith(
-                                          color: accent,
-                                          fontWeight: FontWeight.w700,
-                                        ),
+                                              color: accent,
+                                              fontWeight: FontWeight.w700,
+                                            ),
                                       ),
                                     ],
                                   ),
                                 ),
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: <Widget>[
-                                    Icon(
-                                      schedule.reminderEnabled
-                                          ? Icons.notifications_active
-                                          : Icons.notifications_off_outlined,
-                                      size: 14,
-                                      color: schedule.reminderEnabled
-                                          ? theme.colorScheme.primary
-                                          : theme.colorScheme.onSurfaceVariant,
+                                if (isCanceled)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
                                     ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      schedule.reminderEnabled
-                                          ? formatReminderLead(
-                                              schedule.reminderMinutesBefore,
-                                            )
-                                          : 'Muted',
-                                      style: theme.textTheme.labelSmall?.copyWith(
-                                        color:
-                                            theme.colorScheme.onSurfaceVariant,
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.errorContainer,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      'CANCELED · ${conflictingEvents.first.title}',
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onErrorContainer,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                  )
+                                else
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: <Widget>[
+                                      Icon(
+                                        schedule.reminderEnabled
+                                            ? Icons.notifications_active
+                                            : Icons.notifications_off_outlined,
+                                        size: 14,
+                                        color: schedule.reminderEnabled
+                                            ? theme.colorScheme.primary
+                                            : theme
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
                                       ),
-                                    ),
-                                  ],
-                                ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        schedule.reminderEnabled
+                                            ? formatReminderLead(
+                                                schedule.reminderMinutesBefore,
+                                              )
+                                            : 'Muted',
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                              color: theme
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
                               ],
                             ),
                           ],
@@ -509,7 +770,7 @@ class _SessionCard extends StatelessWidget {
                           ),
                           const PopupMenuItem<String>(
                             value: 'delete',
-                            child: Text('Delete subject'),
+                            child: Text('Remove from schedule'),
                           ),
                         ],
                       ),
@@ -526,10 +787,7 @@ class _SessionCard extends StatelessWidget {
 }
 
 class _EmptyDayView extends StatelessWidget {
-  const _EmptyDayView({
-    required this.weekday,
-    required this.onAddPressed,
-  });
+  const _EmptyDayView({required this.weekday, required this.onAddPressed});
 
   final int weekday;
   final VoidCallback onAddPressed;
