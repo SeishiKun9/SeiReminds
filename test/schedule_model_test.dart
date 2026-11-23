@@ -147,21 +147,99 @@ void main() {
       expect(restored.sessions.length, 3);
       expect(restored.reminderMinutesBefore, 15);
     });
+
+    test('groupedSubjectsForWeekday combines Online, Lecture, and Lab into one subject entry', () {
+      final schedule = SubjectSchedule(
+        id: 'subj-unified',
+        subject: 'Data Structures',
+        section: 'A',
+        sessions: <SessionType, SessionSchedule>{
+          SessionType.laboratory: SessionSchedule(
+            type: SessionType.laboratory,
+            days: const <int>[DateTime.monday, DateTime.wednesday],
+            timeIn: const ScheduleTime(hour: 13, minute: 0),
+            timeOut: const ScheduleTime(hour: 15, minute: 0),
+          ),
+          SessionType.onlineTime: SessionSchedule(
+            type: SessionType.onlineTime,
+            days: const <int>[DateTime.monday, DateTime.wednesday],
+            timeIn: const ScheduleTime(hour: 8, minute: 0),
+            timeOut: const ScheduleTime(hour: 9, minute: 30),
+          ),
+          SessionType.lecture: SessionSchedule(
+            type: SessionType.lecture,
+            days: const <int>[DateTime.monday, DateTime.wednesday],
+            timeIn: const ScheduleTime(hour: 10, minute: 0),
+            timeOut: const ScheduleTime(hour: 11, minute: 30),
+          ),
+        },
+      );
+
+      final grouped = groupedSubjectsForWeekday(
+        <SubjectSchedule>[schedule],
+        DateTime.monday,
+      );
+      expect(grouped.length, 1);
+      expect(grouped.first.schedule.subject, 'Data Structures');
+      expect(grouped.first.sessions.map((s) => s.type).toList(), <SessionType>[
+        SessionType.onlineTime,
+        SessionType.lecture,
+        SessionType.laboratory,
+      ]);
+      expect(schedule.sharedDays, <int>[DateTime.monday, DateTime.wednesday]);
+    });
   });
 
-  group('EventSchedule Whole Day, Evening Time In & cancellation overlap', () {
+  group('EventSchedule Mon-Sat (Saturday Morning only) & cancellation overlap', () {
     test(
-      'enforces Mon-Fri days, Morning/Afternoon/Whole Day slots, and optional Evening Time In',
+      'enforces Mon-Fri Morning/Afternoon/Whole Day and Saturday Morning only',
       () {
         expect(
           EventSchedule.validateFields(
-            title: 'Sports Fest',
+            title: 'Sunday Event',
+            days: const <int>[DateTime.sunday],
+            period: EventPeriod.morning,
+            morningTimeIn: const ScheduleTime(hour: 8, minute: 0),
+            morningTimeOut: const ScheduleTime(hour: 12, minute: 0),
+          ),
+          contains('Monday to Saturday'),
+        );
+
+        // Saturday Afternoon and Saturday Whole Day MUST be rejected.
+        expect(
+          EventSchedule.validateFields(
+            title: 'Sat Seminar',
+            days: const <int>[DateTime.saturday],
+            period: EventPeriod.afternoon,
+            afternoonTimeIn: const ScheduleTime(hour: 13, minute: 0),
+            afternoonTimeOut: const ScheduleTime(hour: 17, minute: 0),
+          ),
+          contains('Saturday events support Morning only'),
+        );
+
+        expect(
+          EventSchedule.validateFields(
+            title: 'Sat Whole Day',
+            days: const <int>[DateTime.saturday],
+            period: EventPeriod.wholeDay,
+            morningTimeIn: const ScheduleTime(hour: 8, minute: 0),
+            morningTimeOut: const ScheduleTime(hour: 12, minute: 0),
+            afternoonTimeIn: const ScheduleTime(hour: 13, minute: 0),
+            afternoonTimeOut: const ScheduleTime(hour: 17, minute: 0),
+          ),
+          contains('Saturday events support Morning only'),
+        );
+
+        // Saturday Morning IS allowed!
+        expect(
+          EventSchedule.validateFields(
+            title: 'Saturday Assembly',
             days: const <int>[DateTime.saturday],
             period: EventPeriod.morning,
             morningTimeIn: const ScheduleTime(hour: 8, minute: 0),
             morningTimeOut: const ScheduleTime(hour: 12, minute: 0),
           ),
-          contains('Monday to Friday'),
+          isNull,
         );
 
         expect(
@@ -198,36 +276,7 @@ void main() {
           contains('Afternoon Time In and Time Out'),
         );
 
-        // Evening Time In must be 5:00 PM+ and not before Afternoon Time Out.
-        expect(
-          EventSchedule.validateFields(
-            title: 'Foundation Day',
-            days: const <int>[DateTime.wednesday],
-            period: EventPeriod.wholeDay,
-            morningTimeIn: const ScheduleTime(hour: 8, minute: 0),
-            morningTimeOut: const ScheduleTime(hour: 12, minute: 0),
-            afternoonTimeIn: const ScheduleTime(hour: 13, minute: 0),
-            afternoonTimeOut: const ScheduleTime(hour: 17, minute: 0),
-            eveningTimeIn: const ScheduleTime(hour: 16, minute: 30),
-          ),
-          contains('5:00 PM'),
-        );
-
-        expect(
-          EventSchedule.validateFields(
-            title: 'Foundation Day',
-            days: const <int>[DateTime.wednesday],
-            period: EventPeriod.wholeDay,
-            morningTimeIn: const ScheduleTime(hour: 8, minute: 0),
-            morningTimeOut: const ScheduleTime(hour: 12, minute: 0),
-            afternoonTimeIn: const ScheduleTime(hour: 13, minute: 0),
-            afternoonTimeOut: const ScheduleTime(hour: 18, minute: 30),
-            eveningTimeIn: const ScheduleTime(hour: 18, minute: 0),
-          ),
-          contains('before Afternoon Time Out'),
-        );
-
-        // Valid Whole Day with Morning In/Out + Afternoon In/Out + Optional Evening Time In.
+        // Valid Mon-Fri Whole Day with Morning In/Out + Afternoon In/Out.
         expect(
           EventSchedule.validateFields(
             title: 'Foundation Day',
@@ -237,7 +286,6 @@ void main() {
             morningTimeOut: const ScheduleTime(hour: 12, minute: 0),
             afternoonTimeIn: const ScheduleTime(hour: 13, minute: 0),
             afternoonTimeOut: const ScheduleTime(hour: 17, minute: 0),
-            eveningTimeIn: const ScheduleTime(hour: 18, minute: 0),
           ),
           isNull,
         );
@@ -245,7 +293,7 @@ void main() {
     );
 
     test(
-      'Whole Day + optional Evening cancels overlapping Morning/Afternoon/Evening classes while keeping lunch gap & other days active',
+      'Whole Day and Saturday Morning events cancel overlapping classes while keeping lunch gap & other days active',
       () {
         final morningAndWed = SubjectSchedule(
           id: 'calc-1',
@@ -255,7 +303,7 @@ void main() {
           sessions: <SessionType, SessionSchedule>{
             SessionType.lecture: SessionSchedule(
               type: SessionType.lecture,
-              days: const <int>[DateTime.monday, DateTime.wednesday],
+              days: const <int>[DateTime.monday, DateTime.wednesday, DateTime.saturday],
               timeIn: const ScheduleTime(hour: 9, minute: 0),
               timeOut: const ScheduleTime(hour: 10, minute: 30),
             ),
@@ -275,21 +323,6 @@ void main() {
           },
         );
 
-        final eveningClass = SubjectSchedule(
-          id: 'night-1',
-          subject: 'Ethics',
-          section: 'B',
-          reminderMinutesBefore: 10,
-          sessions: <SessionType, SessionSchedule>{
-            SessionType.lecture: SessionSchedule(
-              type: SessionType.lecture,
-              days: const <int>[DateTime.monday],
-              timeIn: const ScheduleTime(hour: 18, minute: 30),
-              timeOut: const ScheduleTime(hour: 20, minute: 0),
-            ),
-          },
-        );
-
         final wholeDayEvent = EventSchedule(
           id: 'evt-wd',
           title: 'Intramurals',
@@ -299,16 +332,24 @@ void main() {
           morningTimeOut: const ScheduleTime(hour: 12, minute: 0),
           afternoonTimeIn: const ScheduleTime(hour: 13, minute: 0),
           afternoonTimeOut: const ScheduleTime(hour: 17, minute: 0),
-          eveningTimeIn: const ScheduleTime(hour: 18, minute: 0),
+        );
+
+        final saturdayMorningEvent = EventSchedule(
+          id: 'evt-sat',
+          title: 'Saturday Convocation',
+          days: const <int>[DateTime.saturday],
+          period: EventPeriod.morning,
+          morningTimeIn: const ScheduleTime(hour: 8, minute: 0),
+          morningTimeOut: const ScheduleTime(hour: 12, minute: 0),
         );
 
         final payloads = buildAlarmPayloads(
-          <SubjectSchedule>[morningAndWed, eveningClass],
-          events: <EventSchedule>[wholeDayEvent],
+          <SubjectSchedule>[morningAndWed],
+          events: <EventSchedule>[wholeDayEvent, saturdayMorningEvent],
         );
 
         // Class alarms kept: Wed Lecture + Mon Lunch Online Time (2).
-        // Event alarms created: Morning + Afternoon + Evening (3).
+        // Event alarms created: Mon Morning + Mon Afternoon + Sat Morning (3).
         expect(payloads.length, 5);
         expect(payloads.map((p) => p.id).toSet().length, 5);
 
@@ -334,8 +375,8 @@ void main() {
         expect(
           eventAlarms.any(
             (a) =>
-                a.title == 'Classes Canceled · Intramurals (Evening)' &&
-                a.body.contains('Ethics (Sec B · Lecture)'),
+                a.title == 'Classes Canceled · Saturday Convocation (Morning)' &&
+                a.body.contains('Calculus 1 (Sec A · Lecture)'),
           ),
           isTrue,
         );
@@ -455,7 +496,6 @@ void main() {
           expect(migrated.morningTimeOut, const ScheduleTime(hour: 12, minute: 0));
           expect(migrated.afternoonTimeIn, const ScheduleTime(hour: 12, minute: 0));
           expect(migrated.afternoonTimeOut, const ScheduleTime(hour: 17, minute: 0));
-          expect(migrated.eveningTimeIn, isNull);
         } finally {
           await upgraded.close();
         }
@@ -533,7 +573,7 @@ void main() {
       },
     );
 
-    test('saves Whole Day + optional Evening event in SQLite and keeps data if alarm sync fails', () async {
+    test('saves Whole Day event in SQLite and keeps data if alarm sync fails', () async {
       final db = _createInMemoryDb();
       final alarmService = _FakeAlarmService()..shouldFailSync = true;
       final repo = ScheduleRepository(
@@ -551,16 +591,11 @@ void main() {
           morningTimeOut: const ScheduleTime(hour: 11, minute: 30),
           afternoonTimeIn: const ScheduleTime(hour: 13, minute: 0),
           afternoonTimeOut: const ScheduleTime(hour: 17, minute: 0),
-          eveningTimeIn: const ScheduleTime(hour: 18, minute: 30),
         );
 
         final res = await repo.saveEvent(event, isNew: true);
         expect(res.events.length, 1);
         expect(res.events.first.period, EventPeriod.wholeDay);
-        expect(
-          res.events.first.eveningTimeIn,
-          const ScheduleTime(hour: 18, minute: 30),
-        );
         expect(res.alarmSyncWarning, contains('Saved in SQLite'));
       } finally {
         await repo.close();

@@ -68,12 +68,18 @@ class ScheduleViewModel extends ChangeNotifier {
   List<DaySessionItem> get selectedDaySessions =>
       sessionsForWeekday(_schedules, _selectedWeekday);
 
+  List<DaySubjectGroup> get selectedDaySubjects =>
+      groupedSubjectsForWeekday(_schedules, _selectedWeekday);
+
   List<EventSchedule> get selectedDayEvents =>
       eventsForWeekday(_events, _selectedWeekday);
 
   ({DaySessionItem item, bool isInProgress, int minutesUntilStart})?
       get nextUpcomingSession =>
           findNextUpcomingSession(_schedules, _events, now: _clock());
+
+  int subjectCountForDay(int weekday) =>
+      groupedSubjectsForWeekday(_schedules, weekday).length;
 
   int sessionCountForDay(int weekday) =>
       sessionsForWeekday(_schedules, weekday).length;
@@ -86,6 +92,12 @@ class ScheduleViewModel extends ChangeNotifier {
 
   List<EventSchedule> conflictingEventsFor(DaySessionItem item) =>
       conflictingEventsForSession(_events, item.weekday, item.session);
+
+  List<EventSchedule> conflictingEventsForSessionOnDay(
+    int weekday,
+    SessionSchedule session,
+  ) =>
+      conflictingEventsForSession(_events, weekday, session);
 
   List<DaySessionItem> affectedSessionsForDayEvent(
     EventSchedule event,

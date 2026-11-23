@@ -1,8 +1,7 @@
 const List<int> kSchoolWeekdays = <int>[1, 2, 3, 4, 5, 6];
-const List<int> kEventWeekdays = <int>[1, 2, 3, 4, 5];
+const List<int> kEventWeekdays = <int>[1, 2, 3, 4, 5, 6];
 const List<int> kReminderLeadOptions = <int>[0, 5, 10, 15, 30];
 const int kNoonMinutes = 12 * 60;
-const int kEveningMinMinutes = 17 * 60;
 
 final RegExp _singleLetterPattern = RegExp(r'^[A-Za-z]$');
 
@@ -95,7 +94,7 @@ enum EventPeriod {
   wholeDay(
     'whole_day',
     'Whole Day',
-    'Separate Morning & Afternoon Time In/Out (+ optional Evening Time In)',
+    'Separate Morning Time In/Out and Afternoon Time In/Out (Mon–Fri)',
   );
 
   const EventPeriod(this.key, this.label, this.hint);
@@ -113,7 +112,6 @@ enum EventPeriod {
   static const ScheduleTime defaultMorningOut = ScheduleTime(hour: 12, minute: 0);
   static const ScheduleTime defaultAfternoonIn = ScheduleTime(hour: 13, minute: 0);
   static const ScheduleTime defaultAfternoonOut = ScheduleTime(hour: 17, minute: 0);
-  static const ScheduleTime defaultEveningIn = ScheduleTime(hour: 18, minute: 0);
 
   static EventPeriod fromKey(String key) {
     return switch (key) {
@@ -307,6 +305,17 @@ class SubjectSchedule {
   final bool reminderEnabled;
   final DateTime updatedAt;
 
+  /// Generalized schedule days shared across this subject's sessions (Mon–Sat).
+  List<int> get sharedDays {
+    final all = <int>{};
+    for (final session in sessions.values) {
+      all.addAll(session.days);
+    }
+    return List<int>.unmodifiable(all.toList()..sort());
+  }
+
+  String formatSharedDaysSummary() => sharedDays.map(weekdayShortLabel).join(', ');
+
   SubjectSchedule copyWith({
     String? id,
     String? subject,
@@ -378,31 +387,20 @@ class EventTimeSlot {
     required this.key,
     required this.label,
     required this.timeIn,
-    this.timeOut,
+    required this.timeOut,
   });
 
   final String key;
   final String label;
   final ScheduleTime timeIn;
-
-  /// Null for optional Evening events (Time In only; active through end of day).
-  final ScheduleTime? timeOut;
+  final ScheduleTime timeOut;
 
   bool overlapsSession(SessionSchedule session) {
-    final end = timeOut;
-    if (end != null) {
-      return timesOverlap(timeIn, end, session.timeIn, session.timeOut);
-    }
-    // Evening Time In is open-ended from timeIn through 11:59 PM.
-    return session.timeOut.totalMinutes > timeIn.totalMinutes;
+    return timesOverlap(timeIn, timeOut, session.timeIn, session.timeOut);
   }
 
   String formatRange() {
-    final end = timeOut;
-    if (end == null) {
-      return '$label In ${timeIn.format12Hour()}';
-    }
-    return '$label ${timeIn.format12Hour()} – ${end.format12Hour()}';
+    return '$label ${timeIn.format12Hour()} – ${timeOut.format12Hour()}';
   }
 }
 
@@ -416,7 +414,6 @@ class EventSchedule {
     this.morningTimeOut,
     this.afternoonTimeIn,
     this.afternoonTimeOut,
-    this.eveningTimeIn,
     this.reminderMinutesBefore = 10,
     this.reminderEnabled = true,
     DateTime? updatedAt,
@@ -437,9 +434,6 @@ class EventSchedule {
   final ScheduleTime? morningTimeOut;
   final ScheduleTime? afternoonTimeIn;
   final ScheduleTime? afternoonTimeOut;
-
-  /// Optional evening Time In only (no Time Out).
-  final ScheduleTime? eveningTimeIn;
   final int reminderMinutesBefore;
   final bool reminderEnabled;
   final DateTime updatedAt;
@@ -452,7 +446,6 @@ class EventSchedule {
     ScheduleTime? morningTimeOut,
     ScheduleTime? afternoonTimeIn,
     ScheduleTime? afternoonTimeOut,
-    ScheduleTime? eveningTimeIn,
     int reminderMinutesBefore = 10,
   }) {
     if (title.trim().isEmpty) {
@@ -460,10 +453,13 @@ class EventSchedule {
     }
     final dayList = days.toSet().toList();
     if (dayList.isEmpty) {
-      return 'Pick at least one day (Monday–Friday)';
+      return 'Pick at least one day (Monday–Saturday)';
     }
-    if (dayList.any((d) => d < DateTime.monday || d > DateTime.friday)) {
-      return 'Event schedules must be Monday to Friday only';
+    if (dayList.any((d) => d < DateTime.monday || d > DateTime.saturday)) {
+      return 'Event schedules must be Monday to Saturday only';
+    }
+    if (dayList.contains(DateTime.saturday) && period != EventPeriod.morning) {
+      return 'Saturday events support Morning only';
     }
     if (reminderMinutesBefore < 0 || reminderMinutesBefore > 120) {
       return 'Reminder lead time must be 0–120 minutes';
@@ -498,16 +494,6 @@ class EventSchedule {
       return 'Afternoon times only apply to Afternoon or Whole Day events';
     }
 
-    if (eveningTimeIn != null) {
-      if (eveningTimeIn.totalMinutes < kEveningMinMinutes) {
-        return 'Evening Time In must be 5:00 PM or later';
-      }
-      if (afternoonTimeOut != null &&
-          eveningTimeIn.totalMinutes < afternoonTimeOut.totalMinutes) {
-        return 'Evening Time In cannot be before Afternoon Time Out';
-      }
-    }
-
     return null;
   }
 
@@ -519,7 +505,6 @@ class EventSchedule {
         morningTimeOut: morningTimeOut,
         afternoonTimeIn: afternoonTimeIn,
         afternoonTimeOut: afternoonTimeOut,
-        eveningTimeIn: eveningTimeIn,
         reminderMinutesBefore: reminderMinutesBefore,
       );
 
@@ -529,20 +514,14 @@ class EventSchedule {
             key: 'morning',
             label: 'Morning',
             timeIn: morningTimeIn!,
-            timeOut: morningTimeOut,
+            timeOut: morningTimeOut!,
           ),
         if (afternoonTimeIn != null && afternoonTimeOut != null)
           EventTimeSlot(
             key: 'afternoon',
             label: 'Afternoon',
             timeIn: afternoonTimeIn!,
-            timeOut: afternoonTimeOut,
-          ),
-        if (eveningTimeIn != null)
-          EventTimeSlot(
-            key: 'evening',
-            label: 'Evening',
-            timeIn: eveningTimeIn!,
+            timeOut: afternoonTimeOut!,
           ),
       ];
 
@@ -566,8 +545,6 @@ class EventSchedule {
     ScheduleTime? morningTimeOut,
     ScheduleTime? afternoonTimeIn,
     ScheduleTime? afternoonTimeOut,
-    ScheduleTime? eveningTimeIn,
-    bool clearEvening = false,
     int? reminderMinutesBefore,
     bool? reminderEnabled,
     DateTime? updatedAt,
@@ -588,7 +565,6 @@ class EventSchedule {
       afternoonTimeOut: nextPeriod.hasAfternoon
           ? (afternoonTimeOut ?? this.afternoonTimeOut)
           : null,
-      eveningTimeIn: clearEvening ? null : (eveningTimeIn ?? this.eveningTimeIn),
       reminderMinutesBefore:
           reminderMinutesBefore ?? this.reminderMinutesBefore,
       reminderEnabled: reminderEnabled ?? this.reminderEnabled,
@@ -605,7 +581,6 @@ class EventSchedule {
         'morningTimeOut': morningTimeOut?.toJson(),
         'afternoonTimeIn': afternoonTimeIn?.toJson(),
         'afternoonTimeOut': afternoonTimeOut?.toJson(),
-        'eveningTimeIn': eveningTimeIn?.toJson(),
         'reminderMinutesBefore': reminderMinutesBefore,
         'reminderEnabled': reminderEnabled,
         'updatedAt': updatedAt.toIso8601String(),
@@ -684,6 +659,68 @@ List<DaySessionItem> sessionsForWeekday(
   }
   items.sort();
   return items;
+}
+
+/// Groups all sessions (Online Time, Lecture, Laboratory) of one subject on a weekday.
+class DaySubjectGroup implements Comparable<DaySubjectGroup> {
+  const DaySubjectGroup({
+    required this.schedule,
+    required this.weekday,
+    required this.sessions,
+  });
+
+  final SubjectSchedule schedule;
+  final int weekday;
+  final List<SessionSchedule> sessions;
+
+  ScheduleTime get earliestTimeIn => sessions.first.timeIn;
+
+  ScheduleTime get latestTimeOut {
+    var latest = sessions.first.timeOut;
+    for (final session in sessions) {
+      if (session.timeOut.totalMinutes > latest.totalMinutes) {
+        latest = session.timeOut;
+      }
+    }
+    return latest;
+  }
+
+  @override
+  int compareTo(DaySubjectGroup other) {
+    final byStart = earliestTimeIn.compareTo(other.earliestTimeIn);
+    if (byStart != 0) return byStart;
+    return schedule.subject
+        .toLowerCase()
+        .compareTo(other.schedule.subject.toLowerCase());
+  }
+}
+
+List<DaySubjectGroup> groupedSubjectsForWeekday(
+  List<SubjectSchedule> schedules,
+  int weekday,
+) {
+  final groups = <DaySubjectGroup>[];
+  for (final schedule in schedules) {
+    final daySessions = schedule.sessions.values
+        .where((s) => s.days.contains(weekday))
+        .toList()
+      ..sort((a, b) {
+        final byStart = a.timeIn.compareTo(b.timeIn);
+        if (byStart != 0) return byStart;
+        return a.type.index.compareTo(b.type.index);
+      });
+    if (daySessions.isNotEmpty) {
+      groups.add(
+        DaySubjectGroup(
+          schedule: schedule,
+          weekday: weekday,
+          sessions: List<SessionSchedule>.unmodifiable(daySessions),
+        ),
+      );
+    }
+  }
+  groups.sort();
+  return groups;
 }
 
 List<EventSchedule> eventsForWeekday(

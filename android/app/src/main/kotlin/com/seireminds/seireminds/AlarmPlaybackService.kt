@@ -9,24 +9,21 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
-import android.media.MediaPlayer
-import android.media.RingtoneManager
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 
+/**
+ * Foreground service that drives silent, vibration-only alarms (NO audio)
+ * continuously until the user explicitly presses Stop so it never disturbs class.
+ */
 class AlarmPlaybackService : Service() {
-    private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private val handler = Handler(Looper.getMainLooper())
-    private val autoStopRunnable = Runnable { stopSelf() }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -52,25 +49,20 @@ class AlarmPlaybackService : Service() {
         }
 
         acquireWakeLock()
-        startAlarmAudio()
-        startHardVibration()
+        startContinuousVibration()
 
-        handler.removeCallbacks(autoStopRunnable)
-        handler.postDelayed(autoStopRunnable, AUTO_STOP_MILLIS)
-
-        return START_NOT_STICKY
+        // Keep running and vibrating continuously until the user presses Stop.
+        return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(autoStopRunnable)
-        stopAudioAndVibration()
+        stopVibration()
         releaseWakeLock()
         super.onDestroy()
     }
 
     private fun stopAlarmAndService() {
-        handler.removeCallbacks(autoStopRunnable)
-        stopAudioAndVibration()
+        stopVibration()
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -79,11 +71,12 @@ class AlarmPlaybackService : Service() {
     private fun acquireWakeLock() {
         releaseWakeLock()
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        // shortcut: 30-min wakelock cap prevents runaway battery drain if phone is unattended; vibration loops until Stop.
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "seireminds:alarm_playback_wakelock",
         ).apply {
-            acquire(AUTO_STOP_MILLIS + 5_000L)
+            acquire(MAX_WAKELOCK_MILLIS)
         }
     }
 
@@ -94,33 +87,7 @@ class AlarmPlaybackService : Service() {
         wakeLock = null
     }
 
-    private fun startAlarmAudio() {
-        stopAudioOnly()
-        val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            ?: return
-
-        try {
-            mediaPlayer = MediaPlayer().apply {
-                setDataSource(this@AlarmPlaybackService, alarmUri)
-                // USAGE_ALARM routes through the Alarm stream, bypassing phone Silent/Vibrate mode.
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build(),
-                )
-                isLooping = true
-                prepare()
-                start()
-            }
-        } catch (_: Exception) {
-            stopAudioOnly()
-        }
-    }
-
-    private fun startHardVibration() {
+    private fun startContinuousVibration() {
         val vib = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
         } else {
@@ -141,7 +108,7 @@ class AlarmPlaybackService : Service() {
                 } else {
                     VibrationEffect.createWaveform(HARD_VIBRATION_TIMINGS, 0)
                 }
-                // USAGE_ALARM lets vibration fire hard even while phone is in Silent mode.
+                // USAGE_ALARM lets vibration run even while phone is in Silent mode (zero audio).
                 val attrs = VibrationAttributes.Builder()
                     .setUsage(VibrationAttributes.USAGE_ALARM)
                     .build()
@@ -167,26 +134,11 @@ class AlarmPlaybackService : Service() {
                 vib.vibrate(HARD_VIBRATION_TIMINGS, 0)
             }
         } catch (_: Exception) {
-            // Keep alarm audio and notification running if hardware vibrator rejects waveform.
+            // Keep notification with Stop button visible if hardware vibrator rejects waveform.
         }
     }
 
-    private fun stopAudioOnly() {
-        mediaPlayer?.let { player ->
-            try {
-                if (player.isPlaying) player.stop()
-            } catch (_: Exception) {
-            }
-            try {
-                player.release()
-            } catch (_: Exception) {
-            }
-        }
-        mediaPlayer = null
-    }
-
-    private fun stopAudioAndVibration() {
-        stopAudioOnly()
+    private fun stopVibration() {
         try {
             vibrator?.cancel()
         } catch (_: Exception) {
@@ -203,29 +155,40 @@ class AlarmPlaybackService : Service() {
         const val EXTRA_BODY = "body"
         const val EXTRA_SESSION_LABEL = "session_label"
 
-        private const val ACTIVE_CHANNEL_ID = "seireminds_alarm_active_v1"
-        private const val FALLBACK_CHANNEL_ID = "seireminds_alarm_fallback_v1"
-        private const val CANVAS_TODAY_CHANNEL_ID = "seireminds_canvas_today_v1"
+        // Versioned v2 channels ensure existing installs immediately switch to silent (no-audio) channels.
+        private const val LEGACY_ACTIVE_CHANNEL_ID = "seireminds_alarm_active_v1"
+        private const val LEGACY_FALLBACK_CHANNEL_ID = "seireminds_alarm_fallback_v1"
+        private const val LEGACY_CANVAS_CHANNEL_ID = "seireminds_canvas_today_v1"
+
+        private const val ACTIVE_CHANNEL_ID = "seireminds_alarm_active_v2"
+        private const val FALLBACK_CHANNEL_ID = "seireminds_alarm_fallback_v2"
+        private const val CANVAS_TODAY_CHANNEL_ID = "seireminds_canvas_today_v2"
         private const val FOREGROUND_NOTIFICATION_ID = 4201
-        private const val AUTO_STOP_MILLIS = 60_000L
+        private const val MAX_WAKELOCK_MILLIS = 30 * 60 * 1000L
 
         private val HARD_VIBRATION_TIMINGS = longArrayOf(0, 750, 220, 750, 220, 1100, 350)
         private val HARD_VIBRATION_AMPLITUDES = intArrayOf(0, 255, 0, 255, 0, 255, 0)
+        private val CANVAS_VIBRATION_TIMINGS = longArrayOf(0, 350, 180, 350)
 
         fun ensureChannels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+            // Remove legacy v1 channels that may have cached audio settings on Android.
+            nm.deleteNotificationChannel(LEGACY_ACTIVE_CHANNEL_ID)
+            nm.deleteNotificationChannel(LEGACY_FALLBACK_CHANNEL_ID)
+            nm.deleteNotificationChannel(LEGACY_CANVAS_CHANNEL_ID)
+
             if (nm.getNotificationChannel(ACTIVE_CHANNEL_ID) == null) {
                 val activeChannel = NotificationChannel(
                     ACTIVE_CHANNEL_ID,
-                    "SeiReminds Active Alarms",
+                    "SeiReminds Vibration Alarms",
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "High-priority class alarms that bypass silent mode and vibrate hard."
+                    description = "Silent vibration-only class alarms (no audio) that vibrate until you press Stop."
                     setBypassDnd(true)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                    // Audio and max-amplitude vibration are driven directly by AlarmPlaybackService.
+                    // Zero audio; continuous vibration is driven directly by AlarmPlaybackService until Stop.
                     setSound(null, null)
                     enableVibration(false)
                 }
@@ -233,24 +196,17 @@ class AlarmPlaybackService : Service() {
             }
 
             if (nm.getNotificationChannel(FALLBACK_CHANNEL_ID) == null) {
-                val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                 val fallbackChannel = NotificationChannel(
                     FALLBACK_CHANNEL_ID,
-                    "SeiReminds Fallback Alarms",
+                    "SeiReminds Fallback Vibration Alarms",
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "Fallback alarm notifications if background service is restricted."
+                    description = "Silent vibration-only fallback notifications (no audio)."
                     setBypassDnd(true)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                    setSound(null, null)
                     enableVibration(true)
                     vibrationPattern = HARD_VIBRATION_TIMINGS
-                    setSound(
-                        alarmUri,
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ALARM)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build(),
-                    )
                 }
                 nm.createNotificationChannel(fallbackChannel)
             }
@@ -258,10 +214,13 @@ class AlarmPlaybackService : Service() {
             if (nm.getNotificationChannel(CANVAS_TODAY_CHANNEL_ID) == null) {
                 val canvasChannel = NotificationChannel(
                     CANVAS_TODAY_CHANNEL_ID,
-                    "SeiReminds Canvas Updates",
-                    NotificationManager.IMPORTANCE_DEFAULT,
+                    "SeiReminds Canvas Updates (Vibrate Only)",
+                    NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "Notifications for Canvas announcements and activities posted today."
+                    description = "Silent vibration-only notifications for Canvas announcements and activities posted today."
+                    setSound(null, null)
+                    enableVibration(true)
+                    vibrationPattern = CANVAS_VIBRATION_TIMINGS
                 }
                 nm.createNotificationChannel(canvasChannel)
             }
@@ -294,7 +253,7 @@ class AlarmPlaybackService : Service() {
                 Notification.Builder(context, ACTIVE_CHANNEL_ID)
             } else {
                 @Suppress("DEPRECATION")
-                Notification.Builder(context)
+                Notification.Builder(context).setSound(null)
             }
 
             builder
@@ -307,7 +266,6 @@ class AlarmPlaybackService : Service() {
                 .setOngoing(true)
                 .setAutoCancel(false)
                 .setContentIntent(openAppIntent)
-                .setDeleteIntent(stopIntent)
                 .setFullScreenIntent(openAppIntent, true)
 
             val stopAction = Notification.Action.Builder(
@@ -346,6 +304,8 @@ class AlarmPlaybackService : Service() {
             } else {
                 @Suppress("DEPRECATION")
                 Notification.Builder(context)
+                    .setSound(null)
+                    .setVibrate(HARD_VIBRATION_TIMINGS)
             }
 
             val notification = builder
@@ -385,6 +345,8 @@ class AlarmPlaybackService : Service() {
             } else {
                 @Suppress("DEPRECATION")
                 Notification.Builder(context)
+                    .setSound(null)
+                    .setVibrate(CANVAS_VIBRATION_TIMINGS)
             }
 
             val notification = builder

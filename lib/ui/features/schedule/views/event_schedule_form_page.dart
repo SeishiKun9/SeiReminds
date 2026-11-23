@@ -27,13 +27,12 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
   late ScheduleTime _morningTimeOut;
   late ScheduleTime _afternoonTimeIn;
   late ScheduleTime _afternoonTimeOut;
-  late bool _hasEvening;
-  late ScheduleTime _eveningTimeIn;
   late int _reminderMinutesBefore;
   late bool _reminderEnabled;
   String? _validationError;
 
   bool get _isEditing => widget.existingEvent != null;
+  bool get _hasSaturdaySelected => _selectedDays.contains(DateTime.saturday);
 
   @override
   void initState() {
@@ -41,19 +40,20 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
     final existing = widget.existingEvent;
     _titleController = TextEditingController(text: existing?.title ?? '');
     final defaultDay = widget.initialWeekday >= DateTime.monday &&
-            widget.initialWeekday <= DateTime.friday
+            widget.initialWeekday <= DateTime.saturday
         ? widget.initialWeekday
         : DateTime.monday;
     _selectedDays = existing?.days.toSet() ?? <int>{defaultDay};
     _period = existing?.period ?? EventPeriod.morning;
+    if (_hasSaturdaySelected) {
+      _period = EventPeriod.morning;
+    }
     _morningTimeIn = existing?.morningTimeIn ?? EventPeriod.defaultMorningIn;
     _morningTimeOut = existing?.morningTimeOut ?? EventPeriod.defaultMorningOut;
     _afternoonTimeIn =
         existing?.afternoonTimeIn ?? EventPeriod.defaultAfternoonIn;
     _afternoonTimeOut =
         existing?.afternoonTimeOut ?? EventPeriod.defaultAfternoonOut;
-    _hasEvening = existing?.eveningTimeIn != null;
-    _eveningTimeIn = existing?.eveningTimeIn ?? EventPeriod.defaultEveningIn;
     _reminderMinutesBefore = existing?.reminderMinutesBefore ?? 10;
     _reminderEnabled = existing?.reminderEnabled ?? true;
   }
@@ -72,7 +72,6 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
       _period.hasAfternoon ? _afternoonTimeIn : null;
   ScheduleTime? get _activeAfternoonOut =>
       _period.hasAfternoon ? _afternoonTimeOut : null;
-  ScheduleTime? get _activeEveningIn => _hasEvening ? _eveningTimeIn : null;
 
   Future<void> _pickTime({
     required ScheduleTime initial,
@@ -108,12 +107,6 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
           timeIn: _afternoonTimeIn,
           timeOut: _afternoonTimeOut,
         ),
-      if (_hasEvening)
-        EventTimeSlot(
-          key: 'evening',
-          label: 'Evening',
-          timeIn: _eveningTimeIn,
-        ),
     ];
     if (slots.isEmpty) return const <DaySessionItem>[];
 
@@ -139,7 +132,6 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
       morningTimeOut: _activeMorningOut,
       afternoonTimeIn: _activeAfternoonIn,
       afternoonTimeOut: _activeAfternoonOut,
-      eveningTimeIn: _activeEveningIn,
       reminderMinutesBefore: _reminderMinutesBefore,
     );
 
@@ -159,7 +151,6 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
       morningTimeOut: _activeMorningOut,
       afternoonTimeIn: _activeAfternoonIn,
       afternoonTimeOut: _activeAfternoonOut,
-      eveningTimeIn: _activeEveningIn,
       reminderMinutesBefore: _reminderMinutesBefore,
       reminderEnabled: _reminderEnabled,
     );
@@ -206,14 +197,14 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
             ),
             const SizedBox(height: 20),
             Text(
-              '2. Event Days (Monday – Friday)',
+              '2. Event Days (Monday – Saturday)',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 6),
             Text(
-              'Events run Monday to Friday and announce class cancellations whenever they overlap a subject.',
+              'Monday–Friday supports Morning, Afternoon, or Whole Day. Saturday supports Morning only.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -232,6 +223,9 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
                     setState(() {
                       if (isSelected) {
                         _selectedDays.add(day);
+                        if (day == DateTime.saturday) {
+                          _period = EventPeriod.morning;
+                        }
                       } else {
                         _selectedDays.remove(day);
                       }
@@ -253,22 +247,28 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
               spacing: 8,
               runSpacing: 6,
               children: EventPeriod.values.map((period) {
+                final disabledForSaturday =
+                    _hasSaturdaySelected && period != EventPeriod.morning;
                 return ChoiceChip(
                   key: Key('event_period_${period.key}'),
                   label: Text(period.label),
                   selected: _period == period,
-                  onSelected: (_) {
-                    setState(() {
-                      _period = period;
-                      _validationError = null;
-                    });
-                  },
+                  onSelected: disabledForSaturday
+                      ? null
+                      : (_) {
+                          setState(() {
+                            _period = period;
+                            _validationError = null;
+                          });
+                        },
                 );
               }).toList(),
             ),
             const SizedBox(height: 6),
             Text(
-              _period.hint,
+              _hasSaturdaySelected
+                  ? 'Saturday events support Morning only. Uncheck Sat to pick Afternoon or Whole Day.'
+                  : _period.hint,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -310,46 +310,6 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
                   onPicked: (t) => _afternoonTimeOut = t,
                 ),
               ),
-            Card(
-              margin: const EdgeInsets.only(bottom: 10),
-              child: Column(
-                children: <Widget>[
-                  SwitchListTile(
-                    key: const Key('event_evening_toggle'),
-                    secondary: const Icon(Icons.nights_stay_outlined),
-                    title: const Text(
-                      'Evening (Optional)',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    subtitle: Text(
-                      _hasEvening
-                          ? 'Time In ${_eveningTimeIn.format12Hour()} (no Time Out)'
-                          : 'Off — enable for evening Time In only (5:00 PM+)',
-                    ),
-                    value: _hasEvening,
-                    onChanged: (value) {
-                      setState(() {
-                        _hasEvening = value;
-                        _validationError = null;
-                      });
-                    },
-                  ),
-                  if (_hasEvening)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                      child: _TimeSlotButton(
-                        key: const Key('event_evening_in'),
-                        label: 'Evening Time In (Optional · No Time Out)',
-                        timeText: _eveningTimeIn.format12Hour(),
-                        onTap: () => _pickTime(
-                          initial: _eveningTimeIn,
-                          onPicked: (t) => _eveningTimeIn = t,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
             if (_validationError != null) ...<Widget>[
               const SizedBox(height: 6),
               Text(
@@ -419,7 +379,7 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
             ),
             const SizedBox(height: 18),
             Text(
-              '4. Cancellation Announcement Alarm',
+              '4. Cancellation Vibration Alarm',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
@@ -433,7 +393,7 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
                   children: <Widget>[
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Announce via loud silent-bypass alarm'),
+                      title: const Text('Alert via silent vibration alarm (no audio)'),
                       value: _reminderEnabled,
                       onChanged: (value) {
                         setState(() => _reminderEnabled = value);

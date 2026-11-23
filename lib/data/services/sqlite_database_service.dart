@@ -372,14 +372,13 @@ class SqliteScheduleDatabase {
   Future<List<EventSchedule>> _readEvents(DatabaseExecutor db) async {
     final rows = await db.query(
       'events',
-      orderBy: 'COALESCE(morning_time_in, afternoon_time_in, evening_time_in) ASC, title ASC',
+      orderBy: 'COALESCE(morning_time_in, afternoon_time_in) ASC, title ASC',
     );
     return rows.map((row) {
       final morningIn = row['morning_time_in'] as int?;
       final morningOut = row['morning_time_out'] as int?;
       final afternoonIn = row['afternoon_time_in'] as int?;
       final afternoonOut = row['afternoon_time_out'] as int?;
-      final eveningIn = row['evening_time_in'] as int?;
 
       return EventSchedule(
         id: row['id'] as String,
@@ -397,8 +396,6 @@ class SqliteScheduleDatabase {
         afternoonTimeOut: afternoonOut != null
             ? ScheduleTime.fromTotalMinutes(afternoonOut)
             : null,
-        eveningTimeIn:
-            eveningIn != null ? ScheduleTime.fromTotalMinutes(eveningIn) : null,
         reminderMinutesBefore: row['reminder_minutes_before'] as int,
         reminderEnabled: (row['reminder_enabled'] as int) == 1,
         updatedAt: DateTime.parse(row['updated_at'] as String),
@@ -424,7 +421,7 @@ class SqliteScheduleDatabase {
           'morning_time_out': event.morningTimeOut?.totalMinutes,
           'afternoon_time_in': event.afternoonTimeIn?.totalMinutes,
           'afternoon_time_out': event.afternoonTimeOut?.totalMinutes,
-          'evening_time_in': event.eveningTimeIn?.totalMinutes,
+          'evening_time_in': null,
           'reminder_minutes_before': event.reminderMinutesBefore,
           'reminder_enabled': event.reminderEnabled ? 1 : 0,
           'updated_at': event.updatedAt.toIso8601String(),

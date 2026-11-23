@@ -50,10 +50,10 @@ class MainActivity : FlutterActivity() {
                         val intent = Intent(this, AlarmPlaybackService::class.java).apply {
                             action = AlarmPlaybackService.ACTION_START
                             putExtra(AlarmPlaybackService.EXTRA_ALARM_ID, 999)
-                            putExtra(AlarmPlaybackService.EXTRA_TITLE, "SeiReminds Test Alarm · Sec A")
+                            putExtra(AlarmPlaybackService.EXTRA_TITLE, "SeiReminds Vibration Test · Sec A")
                             putExtra(
                                 AlarmPlaybackService.EXTRA_BODY,
-                                "Silent-bypass alarm & hard vibration test. Tap Stop Alarm to dismiss.",
+                                "Vibration-only test (no audio). Keeps vibrating until you tap Stop Alarm.",
                             )
                             putExtra(AlarmPlaybackService.EXTRA_SESSION_LABEL, "Test")
                         }
@@ -67,8 +67,8 @@ class MainActivity : FlutterActivity() {
                             AlarmPlaybackService.postFallbackAlarmNotification(
                                 context = this,
                                 alarmId = 999,
-                                title = "SeiReminds Test Alarm · Sec A",
-                                body = "Fallback alarm notification triggered.",
+                                title = "SeiReminds Vibration Test · Sec A",
+                                body = "Fallback vibration notification triggered (no audio).",
                             )
                         }
                         result.success(null)

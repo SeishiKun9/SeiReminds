@@ -6,13 +6,11 @@ import '../../../core/app_theme.dart';
 class _SessionDraft {
   _SessionDraft({
     required this.enabled,
-    required this.days,
     required this.timeIn,
     required this.timeOut,
   });
 
   bool enabled;
-  Set<int> days;
   ScheduleTime timeIn;
   ScheduleTime timeOut;
 }
@@ -45,6 +43,7 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
   late final TextEditingController _subjectController;
   late final TextEditingController _sectionController;
 
+  late Set<int> _selectedDays;
   late final Map<SessionType, _SessionDraft> _drafts;
   late int _reminderMinutesBefore;
   late bool _reminderEnabled;
@@ -59,6 +58,9 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
     final existing = widget.existingSchedule;
     _subjectController = TextEditingController(text: existing?.subject ?? '');
     _sectionController = TextEditingController(text: existing?.section ?? '');
+    _selectedDays = existing != null && existing.sharedDays.isNotEmpty
+        ? existing.sharedDays.toSet()
+        : <int>{widget.initialWeekday};
     _reminderMinutesBefore = existing?.reminderMinutesBefore ?? 10;
     _reminderEnabled = existing?.reminderEnabled ?? true;
 
@@ -93,14 +95,12 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
     if (existing != null) {
       return _SessionDraft(
         enabled: true,
-        days: existing.days.toSet(),
         timeIn: existing.timeIn,
         timeOut: existing.timeOut,
       );
     }
     return _SessionDraft(
       enabled: defaultEnabled,
-      days: <int>{widget.initialWeekday},
       timeIn: defaultStart,
       timeOut: defaultEnd,
     );
@@ -150,12 +150,16 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
     final builtSessions = <SessionType, SessionSchedule>{};
     String? sessionValidationError;
 
+    if (_selectedDays.isEmpty) {
+      sessionValidationError = 'Select at least one day (Monday–Saturday).';
+    }
+
     for (final type in SessionType.values) {
       final draft = _drafts[type]!;
       if (!draft.enabled) continue;
       final session = SessionSchedule(
         type: type,
-        days: draft.days,
+        days: _selectedDays,
         timeIn: draft.timeIn,
         timeOut: draft.timeOut,
       );
@@ -326,9 +330,58 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
             const SizedBox(height: 22),
             const _SectionHeader(
               step: '3',
-              title: 'Class Sessions (Mon–Sat)',
+              title: 'Schedule Days (Monday – Saturday)',
               subtitle:
-                  'Select Online Time, Lecture, and/or Laboratory — you can enable all three with their own days, Time In, and Time Out.',
+                  'Set the days once for this subject — shared across Online Time, Lecture, and Laboratory.',
+            ),
+            const SizedBox(height: 10),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: kSchoolWeekdays.map((day) {
+                        final selected = _selectedDays.contains(day);
+                        return FilterChip(
+                          key: Key('subject_day_$day'),
+                          label: Text(weekdayShortLabel(day)),
+                          selected: selected,
+                          onSelected: (isSelected) {
+                            setState(() {
+                              if (isSelected) {
+                                _selectedDays.add(day);
+                              } else {
+                                _selectedDays.remove(day);
+                              }
+                              _sessionsError = null;
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    if (_selectedDays.isEmpty) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Select at least one day (Mon–Sat).',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 22),
+            const _SectionHeader(
+              step: '4',
+              title: 'Session Times',
+              subtitle:
+                  'Enable Online Time, Lecture, and/or Laboratory — only Time In and Time Out differ per type.',
             ),
             if (_sessionsError != null) ...<Widget>[
               const SizedBox(height: 8),
@@ -347,10 +400,10 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
             }),
             const SizedBox(height: 16),
             const _SectionHeader(
-              step: '4',
-              title: 'Loud Silent-Bypass Alarm',
+              step: '5',
+              title: 'Silent Vibration Alarm',
               subtitle:
-                  'Rings on Alarm volume & vibrates hard even when phone is silent or app is closed.',
+                  'Vibrates silently (no audio) until you press Stop so it never disturbs class.',
             ),
             const SizedBox(height: 8),
             Card(
@@ -417,7 +470,6 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
     final accent = AppTheme.sessionColor(type, theme.brightness);
     final timeInvalid =
         draft.enabled && draft.timeOut.totalMinutes <= draft.timeIn.totalMinutes;
-    final daysEmpty = draft.enabled && draft.days.isEmpty;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -446,15 +498,12 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
             subtitle: Text(
               draft.enabled
                   ? '${draft.timeIn.format12Hour()} – ${draft.timeOut.format12Hour()}'
-                  : 'Off — toggle to set days, Time In & Time Out',
+                  : 'Off — toggle to set Time In & Time Out',
             ),
             value: draft.enabled,
             onChanged: (value) {
               setState(() {
                 draft.enabled = value;
-                if (value && draft.days.isEmpty) {
-                  draft.days.add(widget.initialWeekday);
-                }
                 _sessionsError = null;
               });
             },
@@ -466,43 +515,6 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   const Divider(height: 12),
-                  Text(
-                    'Days (Monday – Saturday)',
-                    style: theme.textTheme.labelMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: kSchoolWeekdays.map((day) {
-                      final selected = draft.days.contains(day);
-                      return FilterChip(
-                        key: Key('day_${type.key}_$day'),
-                        label: Text(weekdayShortLabel(day)),
-                        selected: selected,
-                        onSelected: (isSelected) {
-                          setState(() {
-                            if (isSelected) {
-                              draft.days.add(day);
-                            } else {
-                              draft.days.remove(day);
-                            }
-                            _sessionsError = null;
-                          });
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  if (daysEmpty) ...<Widget>[
-                    const SizedBox(height: 6),
-                    Text(
-                      'Select at least one day (Mon–Sat).',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.error,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
                   Row(
                     children: <Widget>[
                       Expanded(

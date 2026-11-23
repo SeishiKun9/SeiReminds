@@ -60,7 +60,7 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Alarm & Silent-Bypass Setup',
+                        'Silent Vibration Alarm Setup',
                         style: theme.textTheme.titleLarge,
                       ),
                     ),
@@ -73,7 +73,7 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'SeiReminds uses Android Alarm audio & Alarm vibration channels so reminders ring and vibrate hard even when your phone is on Silent and the app is closed.',
+                  'SeiReminds uses vibration-only alarms and notifications (no audio) that keep vibrating until you press Stop, so reminders never disturb your class.',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -141,7 +141,7 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                               }
                             : null,
                         icon: const Icon(Icons.vibration),
-                        label: const Text('Test Loud Alarm'),
+                        label: const Text('Test Vibration Alarm'),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -162,7 +162,7 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                 if (_testTriggered) ...<Widget>[
                   const SizedBox(height: 10),
                   Text(
-                    'Test alarm active. Try flipping your phone to Silent mode to verify sound & hard vibration, then tap Stop.',
+                    'Vibration alarm active (no audio). It will keep vibrating continuously until you tap Stop.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.primary,
                     ),

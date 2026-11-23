@@ -92,7 +92,7 @@ void main() {
       }
       expect(find.text('Sun'), findsNothing);
 
-      // 1. Add class with section 1-letter A-Z validation and Online + Lecture + Lab.
+      // 1. Add unified subject with generalized Mon & Wed days and Online + Lecture + Lab times.
       await tester.tap(find.byKey(const Key('add_schedule_fab')));
       await tester.pumpAndSettle();
 
@@ -117,6 +117,18 @@ void main() {
           )
           .first;
 
+      // Generalized Schedule Days selector (Mon already selected; also select Wed).
+      final wedSharedDayChip = find.byKey(
+        const Key('subject_day_${DateTime.wednesday}'),
+      );
+      await tester.scrollUntilVisible(
+        wedSharedDayChip,
+        200,
+        scrollable: formScrollable,
+      );
+      await tester.tap(wedSharedDayChip);
+      await tester.pumpAndSettle();
+
       final lectureToggle = find.byKey(const Key('session_toggle_lecture'));
       await tester.scrollUntilVisible(
         lectureToggle,
@@ -124,17 +136,6 @@ void main() {
         scrollable: formScrollable,
       );
       await tester.tap(lectureToggle);
-      await tester.pumpAndSettle();
-
-      final wedLectureChip = find.byKey(
-        const Key('day_lecture_${DateTime.wednesday}'),
-      );
-      await tester.scrollUntilVisible(
-        wedLectureChip,
-        200,
-        scrollable: formScrollable,
-      );
-      await tester.tap(wedLectureChip);
       await tester.pumpAndSettle();
 
       final labToggle = find.byKey(const Key('session_toggle_laboratory'));
@@ -149,16 +150,55 @@ void main() {
       await tester.tap(find.byKey(const Key('save_schedule_button')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Data Structures'), findsNWidgets(3));
-      expect(find.text('Sec B'), findsNWidgets(3));
-      expect(alarmService.syncedAlarms.length, 4);
+      // ONE unified subject card on Monday showing Online Time, Lecture, and Laboratory together!
+      expect(find.text('Data Structures'), findsOneWidget);
+      expect(find.text('Sec B'), findsOneWidget);
+      expect(find.text('Online Time'), findsOneWidget);
+      expect(find.text('Lecture'), findsOneWidget);
+      expect(find.text('Laboratory'), findsOneWidget);
+      // 3 sessions x 2 generalized days (Mon, Wed) = 6 alarms.
+      expect(alarmService.syncedAlarms.length, 6);
 
-      // 2. Add Whole Day Event with Morning In/Out + Afternoon In/Out + Optional Evening Time In.
+      // Tapping the subject opens the detail sheet displaying Online, Lecture, and Laboratory together.
+      await tester.tap(find.text('Data Structures'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('subject_detail_sheet')), findsOneWidget);
+      expect(
+        find.byKey(const Key('detail_session_online_time')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('detail_session_lecture')), findsOneWidget);
+      expect(
+        find.byKey(const Key('detail_session_laboratory')),
+        findsOneWidget,
+      );
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      // 2. Add Event: verify Saturday (Morning only), no Evening optional, and Whole Day on Mon.
       await tester.tap(find.byKey(const Key('add_event_button')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Morning & Afternoon'), findsNothing);
       expect(find.text('Whole Day'), findsOneWidget);
+      expect(find.byKey(const Key('event_day_${DateTime.saturday}')), findsOneWidget);
+      expect(find.byKey(const Key('event_evening_toggle')), findsNothing);
+      expect(find.textContaining('Evening'), findsNothing);
+
+      // Selecting Saturday locks coverage to Morning only.
+      await tester.tap(find.byKey(const Key('event_day_${DateTime.saturday}')));
+      await tester.pumpAndSettle();
+      final afternoonChip = tester.widget<ChoiceChip>(
+        find.byKey(const Key('event_period_afternoon')),
+      );
+      final wholeDayChip = tester.widget<ChoiceChip>(
+        find.byKey(const Key('event_period_whole_day')),
+      );
+      expect(afternoonChip.onSelected, isNull);
+      expect(wholeDayChip.onSelected, isNull);
+
+      // Uncheck Saturday so Monday can use Whole Day.
+      await tester.tap(find.byKey(const Key('event_day_${DateTime.saturday}')));
+      await tester.pumpAndSettle();
 
       await tester.enterText(
         find.byKey(const Key('event_title_field')),
@@ -169,7 +209,6 @@ void main() {
       await tester.tap(find.byKey(const Key('event_period_whole_day')));
       await tester.pumpAndSettle();
 
-      // Verify both Morning and Afternoon Time In/Out exist.
       final eventScrollable = find
           .descendant(
             of: find.byType(ListView),
@@ -186,21 +225,6 @@ void main() {
       expect(find.byKey(const Key('event_afternoon_in')), findsOneWidget);
       expect(find.byKey(const Key('event_afternoon_out')), findsOneWidget);
 
-      // Toggle Optional Evening Time In (only Time In, no Time Out).
-      final eveningToggle = find.byKey(const Key('event_evening_toggle'));
-      await tester.scrollUntilVisible(
-        eveningToggle,
-        300,
-        scrollable: eventScrollable,
-      );
-      await tester.drag(eventScrollable, const Offset(0, -160));
-      await tester.pumpAndSettle();
-      await tester.tap(eveningToggle);
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('event_evening_in')), findsOneWidget);
-      expect(find.textContaining('Evening Time Out'), findsNothing);
-
       // Whole Day hits all 3 Monday sessions (Online 8-9:30, Lecture 10-11:30, Lab 1-3).
       final impactText = find.textContaining(
         'Will announce classes canceled (3 hit)',
@@ -216,11 +240,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('CLASSES CANCELED · Foundation Day'), findsOneWidget);
-      expect(find.textContaining('Evening In 6:00 PM'), findsOneWidget);
       expect(find.text('CANCELED · Foundation Day'), findsNWidgets(3));
 
-      // Synced alarms: Wed Lecture (1) + Mon Whole Day Morning, Afternoon, Evening (3) = 4 total.
-      expect(alarmService.syncedAlarms.length, 4);
+      // Synced alarms: Wed (Online, Lecture, Lab = 3) + Mon Whole Day (Morning, Afternoon = 2) = 5 total.
+      expect(alarmService.syncedAlarms.length, 5);
       expect(
         alarmService.syncedAlarms.any(
           (a) => a.title == 'Classes Canceled · Foundation Day (Morning)',
@@ -230,12 +253,6 @@ void main() {
       expect(
         alarmService.syncedAlarms.any(
           (a) => a.title == 'Classes Canceled · Foundation Day (Afternoon)',
-        ),
-        isTrue,
-      );
-      expect(
-        alarmService.syncedAlarms.any(
-          (a) => a.title == 'Event · Foundation Day (Evening)',
         ),
         isTrue,
       );
@@ -276,10 +293,10 @@ void main() {
       expect(find.text('Visible (0)'), findsOneWidget);
       expect(find.text('Preserved (0)'), findsOneWidget);
 
-      // Return to timetable and verify schedules remain untouched.
+      // Return to timetable and verify unified schedule remains untouched.
       await tester.pageBack();
       await tester.pumpAndSettle();
-      expect(find.text('Data Structures'), findsNWidgets(3));
+      expect(find.text('Data Structures'), findsOneWidget);
       expect(find.text('CLASSES CANCELED · Foundation Day'), findsOneWidget);
     },
   );

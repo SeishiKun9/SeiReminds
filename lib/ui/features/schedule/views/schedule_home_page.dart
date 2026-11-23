@@ -156,6 +156,32 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
     );
   }
 
+  void _openSubjectDetails(SubjectSchedule schedule, int weekday) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => _SubjectDetailSheet(
+        schedule: schedule,
+        weekday: weekday,
+        conflictingEventsForSession: (session) =>
+            widget.viewModel.conflictingEventsForSessionOnDay(weekday, session),
+        onEdit: () {
+          Navigator.of(sheetContext).pop();
+          _openClassForm(existing: schedule);
+        },
+        onToggleReminder: () {
+          Navigator.of(sheetContext).pop();
+          widget.viewModel.toggleReminder(schedule.id, !schedule.reminderEnabled);
+        },
+        onDelete: () {
+          Navigator.of(sheetContext).pop();
+          _confirmDeleteSchedule(schedule);
+        },
+      ),
+    );
+  }
+
   void _openSettings() {
     Navigator.of(context).pushNamed(AppRoutes.settings);
   }
@@ -179,7 +205,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
             (isSignedIn && (cvm?.isConnected ?? false)) ||
             vm.todayCanvasItems.isNotEmpty;
         final dayEvents = vm.selectedDayEvents;
-        final daySessions = vm.selectedDaySessions;
+        final daySubjects = vm.selectedDaySubjects;
         final nextUp = vm.nextUpcomingSession;
 
         return Scaffold(
@@ -237,7 +263,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                     if (vm.permissionStatus.needsAttention)
                       _AlertStrip(
                         icon: Icons.warning_amber_rounded,
-                        message: 'Grant alarm permissions so reminders bypass silent mode while unused.',
+                        message: 'Grant alarm permissions so vibration reminders fire on time while unused.',
                         actionLabel: 'Setup',
                         onAction: _openAlarmSetup,
                       ),
@@ -250,7 +276,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                       ),
                     _WeekdayStrip(
                       selectedWeekday: vm.selectedWeekday,
-                      countForDay: vm.sessionCountForDay,
+                      countForDay: vm.subjectCountForDay,
                       eventCountForDay: vm.eventCountForDay,
                       onSelect: vm.selectWeekday,
                     ),
@@ -269,7 +295,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                   ),
                                 ),
                                 Text(
-                                  '${daySessions.length} ${daySessions.length == 1 ? 'session' : 'sessions'} · ${dayEvents.length} ${dayEvents.length == 1 ? 'event' : 'events'} · ${vm.totalActiveAlarmCount} alarms',
+                                  '${daySubjects.length} ${daySubjects.length == 1 ? 'subject' : 'subjects'} · ${dayEvents.length} ${dayEvents.length == 1 ? 'event' : 'events'} · ${vm.totalActiveAlarmCount} alarms',
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     color: theme.colorScheme.onSurfaceVariant,
                                   ),
@@ -300,7 +326,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                 ),
                               ),
                             )
-                          : (daySessions.isEmpty &&
+                          : (daySubjects.isEmpty &&
                                   dayEvents.isEmpty &&
                                   !showCanvasCard)
                           ? _EmptyDayView(
@@ -334,7 +360,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                           : null,
                                     ),
                                   ),
-                                if (daySessions.isEmpty && dayEvents.isEmpty)
+                                if (daySubjects.isEmpty && dayEvents.isEmpty)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 12),
                                     child: _EmptyDayView(
@@ -365,23 +391,29 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                     ),
                                   );
                                 }),
-                                ...daySessions.map((item) {
-                                  final conflicts = vm.conflictingEventsFor(
-                                    item,
-                                  );
+                                ...daySubjects.map((group) {
                                   return Padding(
                                     padding: const EdgeInsets.only(bottom: 10),
-                                    child: _SessionCard(
-                                      item: item,
-                                      conflictingEvents: conflicts,
-                                      onEdit: () => _openClassForm(
-                                        existing: item.schedule,
+                                    child: _SubjectDayCard(
+                                      group: group,
+                                      conflictingEventsForSession: (session) =>
+                                          vm.conflictingEventsForSessionOnDay(
+                                            group.weekday,
+                                            session,
+                                          ),
+                                      onTap: () => _openSubjectDetails(
+                                        group.schedule,
+                                        group.weekday,
                                       ),
-                                      onDelete: () =>
-                                          _confirmDeleteSchedule(item.schedule),
+                                      onEdit: () => _openClassForm(
+                                        existing: group.schedule,
+                                      ),
+                                      onDelete: () => _confirmDeleteSchedule(
+                                        group.schedule,
+                                      ),
                                       onToggleReminder: (enabled) =>
                                           vm.toggleReminder(
-                                            item.schedule.id,
+                                            group.schedule.id,
                                             enabled,
                                           ),
                                     ),
@@ -623,17 +655,20 @@ class _WeekdayStrip extends StatelessWidget {
   }
 }
 
-class _SessionCard extends StatelessWidget {
-  const _SessionCard({
-    required this.item,
-    required this.conflictingEvents,
+class _SubjectDayCard extends StatelessWidget {
+  const _SubjectDayCard({
+    required this.group,
+    required this.conflictingEventsForSession,
+    required this.onTap,
     required this.onEdit,
     required this.onDelete,
     required this.onToggleReminder,
   });
 
-  final DaySessionItem item;
-  final List<EventSchedule> conflictingEvents;
+  final DaySubjectGroup group;
+  final List<EventSchedule> Function(SessionSchedule session)
+      conflictingEventsForSession;
+  final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<bool> onToggleReminder;
@@ -641,16 +676,18 @@ class _SessionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isCanceled = conflictingEvents.isNotEmpty;
-    final accent = isCanceled
+    final schedule = group.schedule;
+    final allCanceled = group.sessions
+        .every((s) => conflictingEventsForSession(s).isNotEmpty);
+    final accent = allCanceled
         ? theme.colorScheme.error
-        : AppTheme.sessionColor(item.session.type, theme.brightness);
-    final schedule = item.schedule;
+        : AppTheme.sessionColor(group.sessions.first.type, theme.brightness);
 
     return Card(
+      key: Key('subject_card_${schedule.id}'),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onEdit,
+        onTap: onTap,
         child: IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -662,28 +699,6 @@ class _SessionCard extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      SizedBox(
-                        width: 78,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Text(
-                              item.session.timeIn.format12Hour(),
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              item.session.timeOut.format12Hour(),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -696,7 +711,7 @@ class _SessionCard extends StatelessWidget {
                                     style: theme.textTheme.titleMedium
                                         ?.copyWith(
                                           fontWeight: FontWeight.w700,
-                                          decoration: isCanceled
+                                          decoration: allCanceled
                                               ? TextDecoration.lineThrough
                                               : null,
                                         ),
@@ -722,93 +737,119 @@ class _SessionCard extends StatelessWidget {
                                 ),
                               ],
                             ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${schedule.formatSharedDaysSummary()} · Tap to view Online, Lecture & Lab',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
                             const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 6,
-                              crossAxisAlignment: WrapCrossAlignment.center,
+                            ...group.sessions.map((session) {
+                              final conflicts =
+                                  conflictingEventsForSession(session);
+                              final canceled = conflicts.isNotEmpty;
+                              final sessionAccent = canceled
+                                  ? theme.colorScheme.error
+                                  : AppTheme.sessionColor(
+                                      session.type,
+                                      theme.brightness,
+                                    );
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 4,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: <Widget>[
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: sessionAccent.withValues(
+                                          alpha: 0.14,
+                                        ),
+                                        borderRadius: BorderRadius.circular(999),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: <Widget>[
+                                          Icon(
+                                            AppTheme.sessionIcon(session.type),
+                                            size: 13,
+                                            color: sessionAccent,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            session.type.label,
+                                            style: theme.textTheme.labelSmall
+                                                ?.copyWith(
+                                                  color: sessionAccent,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Text(
+                                      session.formatTimeRange(),
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        decoration: canceled
+                                            ? TextDecoration.lineThrough
+                                            : null,
+                                      ),
+                                    ),
+                                    if (canceled)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color:
+                                              theme.colorScheme.errorContainer,
+                                          borderRadius:
+                                              BorderRadius.circular(999),
+                                        ),
+                                        child: Text(
+                                          'CANCELED · ${conflicts.first.title}',
+                                          style: theme.textTheme.labelSmall
+                                              ?.copyWith(
+                                                color: theme
+                                                    .colorScheme
+                                                    .onErrorContainer,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            }),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: <Widget>[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: accent.withValues(alpha: 0.14),
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: <Widget>[
-                                      Icon(
-                                        AppTheme.sessionIcon(item.session.type),
-                                        size: 14,
-                                        color: accent,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        item.session.type.label,
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(
-                                              color: accent,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                      ),
-                                    ],
+                                Icon(
+                                  schedule.reminderEnabled
+                                      ? Icons.vibration
+                                      : Icons.notifications_off_outlined,
+                                  size: 14,
+                                  color: schedule.reminderEnabled
+                                      ? theme.colorScheme.primary
+                                      : theme.colorScheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  schedule.reminderEnabled
+                                      ? 'Vibrate ${formatReminderLead(schedule.reminderMinutesBefore)}'
+                                      : 'Muted',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
-                                if (isCanceled)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: theme.colorScheme.errorContainer,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      'CANCELED · ${conflictingEvents.first.title}',
-                                      style: theme.textTheme.labelSmall
-                                          ?.copyWith(
-                                            color: theme
-                                                .colorScheme
-                                                .onErrorContainer,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                    ),
-                                  )
-                                else
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: <Widget>[
-                                      Icon(
-                                        schedule.reminderEnabled
-                                            ? Icons.notifications_active
-                                            : Icons.notifications_off_outlined,
-                                        size: 14,
-                                        color: schedule.reminderEnabled
-                                            ? theme.colorScheme.primary
-                                            : theme
-                                                  .colorScheme
-                                                  .onSurfaceVariant,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        schedule.reminderEnabled
-                                            ? formatReminderLead(
-                                                schedule.reminderMinutesBefore,
-                                              )
-                                            : 'Muted',
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(
-                                              color: theme
-                                                  .colorScheme
-                                                  .onSurfaceVariant,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
                               ],
                             ),
                           ],
@@ -817,7 +858,9 @@ class _SessionCard extends StatelessWidget {
                       PopupMenuButton<String>(
                         tooltip: 'Class actions',
                         onSelected: (value) {
-                          if (value == 'edit') {
+                          if (value == 'view') {
+                            onTap();
+                          } else if (value == 'edit') {
                             onEdit();
                           } else if (value == 'toggle') {
                             onToggleReminder(!schedule.reminderEnabled);
@@ -826,6 +869,10 @@ class _SessionCard extends StatelessWidget {
                           }
                         },
                         itemBuilder: (_) => <PopupMenuEntry<String>>[
+                          const PopupMenuItem<String>(
+                            value: 'view',
+                            child: Text('View Online, Lecture & Lab'),
+                          ),
                           const PopupMenuItem<String>(
                             value: 'edit',
                             child: Text('Edit schedule'),
@@ -850,6 +897,196 @@ class _SessionCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SubjectDetailSheet extends StatelessWidget {
+  const _SubjectDetailSheet({
+    required this.schedule,
+    required this.weekday,
+    required this.conflictingEventsForSession,
+    required this.onEdit,
+    required this.onToggleReminder,
+    required this.onDelete,
+  });
+
+  final SubjectSchedule schedule;
+  final int weekday;
+  final List<EventSchedule> Function(SessionSchedule session)
+      conflictingEventsForSession;
+  final VoidCallback onEdit;
+  final VoidCallback onToggleReminder;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        key: const Key('subject_detail_sheet'),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        schedule.subject,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Section ${schedule.section} · ${schedule.formatSharedDaysSummary()}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: cs.primaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    'Sec ${schedule.section}',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: cs.onPrimaryContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            ...SessionType.values.map((type) {
+              final session = schedule.sessions[type];
+              final conflicts = session != null
+                  ? conflictingEventsForSession(session)
+                  : const <EventSchedule>[];
+              final isCanceled = conflicts.isNotEmpty;
+              final accent = session == null
+                  ? cs.outline
+                  : (isCanceled
+                      ? cs.error
+                      : AppTheme.sessionColor(type, theme.brightness));
+
+              return Card(
+                key: Key('detail_session_${type.key}'),
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: accent.withValues(alpha: 0.14),
+                    foregroundColor: accent,
+                    child: Icon(AppTheme.sessionIcon(type)),
+                  ),
+                  title: Text(
+                    type.label,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: session == null
+                      ? Text(
+                          'Not scheduled',
+                          style: TextStyle(color: cs.onSurfaceVariant),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              session.formatTimeRange(),
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                decoration: isCanceled
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                              ),
+                            ),
+                            if (isCanceled)
+                              Text(
+                                'CANCELED on ${weekdayShortLabel(weekday)} · ${conflicts.first.title}',
+                                style: TextStyle(
+                                  color: cs.error,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                          ],
+                        ),
+                ),
+              );
+            }),
+            const SizedBox(height: 6),
+            Row(
+              children: <Widget>[
+                Icon(
+                  schedule.reminderEnabled
+                      ? Icons.vibration
+                      : Icons.notifications_off_outlined,
+                  size: 18,
+                  color: cs.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    schedule.reminderEnabled
+                        ? 'Silent vibration alarm · ${formatReminderLead(schedule.reminderMinutesBefore)} (no audio, vibrates until Stop)'
+                        : 'Vibration alarm muted',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                FilledButton.icon(
+                  key: const Key('detail_edit_schedule_button'),
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text('Edit Schedule'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: onToggleReminder,
+                  icon: Icon(
+                    schedule.reminderEnabled
+                        ? Icons.notifications_off_outlined
+                        : Icons.vibration,
+                    size: 18,
+                  ),
+                  label: Text(
+                    schedule.reminderEnabled ? 'Mute Alarm' : 'Enable Alarm',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(foregroundColor: cs.error),
+                  onPressed: onDelete,
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  label: const Text('Remove'),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
