@@ -194,13 +194,17 @@ class _PermissionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final readyColor = theme.brightness == Brightness.dark
+        ? const Color(0xFF86EFAC)
+        : const Color(0xFF15803D);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         leading: Icon(
           granted ? Icons.check_circle : Icons.warning_amber_rounded,
-          color: granted ? Colors.green.shade600 : colorScheme.error,
+          color: granted ? readyColor : colorScheme.error,
         ),
         title: Text(title),
         subtitle: Text(subtitle),
@@ -208,7 +212,7 @@ class _PermissionTile extends StatelessWidget {
             ? Text(
                 'Ready',
                 style: TextStyle(
-                  color: Colors.green.shade700,
+                  color: readyColor,
                   fontWeight: FontWeight.w600,
                 ),
               )

@@ -132,22 +132,30 @@ class AlarmPlaybackService : Service() {
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                val effect = VibrationEffect.createWaveform(
-                    HARD_VIBRATION_TIMINGS,
-                    HARD_VIBRATION_AMPLITUDES,
-                    0,
-                )
-                // USAGE_ALARM lets max-amplitude vibration fire even while phone is in Silent mode.
+                val effect = if (vib.hasAmplitudeControl()) {
+                    VibrationEffect.createWaveform(
+                        HARD_VIBRATION_TIMINGS,
+                        HARD_VIBRATION_AMPLITUDES,
+                        0,
+                    )
+                } else {
+                    VibrationEffect.createWaveform(HARD_VIBRATION_TIMINGS, 0)
+                }
+                // USAGE_ALARM lets vibration fire hard even while phone is in Silent mode.
                 val attrs = VibrationAttributes.Builder()
                     .setUsage(VibrationAttributes.USAGE_ALARM)
                     .build()
                 vib.vibrate(effect, attrs)
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val effect = VibrationEffect.createWaveform(
-                    HARD_VIBRATION_TIMINGS,
-                    HARD_VIBRATION_AMPLITUDES,
-                    0,
-                )
+                val effect = if (vib.hasAmplitudeControl()) {
+                    VibrationEffect.createWaveform(
+                        HARD_VIBRATION_TIMINGS,
+                        HARD_VIBRATION_AMPLITUDES,
+                        0,
+                    )
+                } else {
+                    VibrationEffect.createWaveform(HARD_VIBRATION_TIMINGS, 0)
+                }
                 val attrs = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -159,7 +167,7 @@ class AlarmPlaybackService : Service() {
                 vib.vibrate(HARD_VIBRATION_TIMINGS, 0)
             }
         } catch (_: Exception) {
-            // Keep alarm audio and notification running if hardware vibrator rejects amplitude.
+            // Keep alarm audio and notification running if hardware vibrator rejects waveform.
         }
     }
 
@@ -197,6 +205,7 @@ class AlarmPlaybackService : Service() {
 
         private const val ACTIVE_CHANNEL_ID = "seireminds_alarm_active_v1"
         private const val FALLBACK_CHANNEL_ID = "seireminds_alarm_fallback_v1"
+        private const val CANVAS_TODAY_CHANNEL_ID = "seireminds_canvas_today_v1"
         private const val FOREGROUND_NOTIFICATION_ID = 4201
         private const val AUTO_STOP_MILLIS = 60_000L
 
@@ -244,6 +253,17 @@ class AlarmPlaybackService : Service() {
                     )
                 }
                 nm.createNotificationChannel(fallbackChannel)
+            }
+
+            if (nm.getNotificationChannel(CANVAS_TODAY_CHANNEL_ID) == null) {
+                val canvasChannel = NotificationChannel(
+                    CANVAS_TODAY_CHANNEL_ID,
+                    "SeiReminds Canvas Updates",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = "Notifications for Canvas announcements and activities posted today."
+                }
+                nm.createNotificationChannel(canvasChannel)
             }
         }
 
@@ -341,6 +361,42 @@ class AlarmPlaybackService : Service() {
                 .build()
 
             nm.notify(alarmId, notification)
+        }
+
+        fun postTodayCanvasNotification(
+            context: Context,
+            notificationId: Int,
+            title: String,
+            body: String,
+        ) {
+            ensureChannels(context)
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val openAppIntent = PendingIntent.getActivity(
+                context,
+                notificationId,
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(context, CANVAS_TODAY_CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(context)
+            }
+
+            val notification = builder
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(Notification.BigTextStyle().bigText(body))
+                .setAutoCancel(true)
+                .setContentIntent(openAppIntent)
+                .build()
+
+            nm.notify(notificationId, notification)
         }
     }
 }

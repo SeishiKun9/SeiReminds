@@ -422,6 +422,116 @@ void main() {
         TokenExpirationWarningLevel.unverified,
       );
     });
+
+    test('fetches strictly current-day Canvas announcements & activities and discards yesterday items', () async {
+      final nowLocal = DateTime(2026, 11, 23, 14, 0);
+      final todayIso = DateTime(2026, 11, 23, 9, 30).toUtc().toIso8601String();
+      final yesterdayIso =
+          DateTime(2026, 11, 22, 23, 59).toUtc().toIso8601String();
+
+      expect(
+        isPostedOnCurrentDay(DateTime(2026, 11, 23, 0, 1), now: nowLocal),
+        isTrue,
+      );
+      expect(
+        isPostedOnCurrentDay(DateTime(2026, 11, 22, 23, 59), now: nowLocal),
+        isFalse,
+      );
+      expect(stripCanvasHtml('<p>Hello &amp; <b>world</b></p>'), 'Hello & world');
+
+      final client = CanvasApiClient(
+        httpClient: MockClient((http.Request req) async {
+          expect(req.method, 'GET');
+          if (req.url.path == '/api/v1/courses') {
+            return http.Response(
+              jsonEncode(<Map<String, Object>>[
+                <String, Object>{'id': 10, 'name': 'Data Structures'},
+              ]),
+              200,
+            );
+          }
+          if (req.url.path == '/api/v1/announcements') {
+            return http.Response(
+              jsonEncode(<Map<String, Object>>[
+                <String, Object>{
+                  'id': 501,
+                  'title': 'Room Change Today',
+                  'message': '<p>Move to Room 302</p>',
+                  'posted_at': todayIso,
+                  'context_code': 'course_10',
+                },
+                <String, Object>{
+                  'id': 500,
+                  'title': 'Yesterday Reminder',
+                  'message': '<p>Old announcement</p>',
+                  'posted_at': yesterdayIso,
+                  'context_code': 'course_10',
+                },
+              ]),
+              200,
+            );
+          }
+          if (req.url.path == '/api/v1/users/self/activity_stream') {
+            return http.Response(
+              jsonEncode(<Map<String, Object>>[
+                // Duplicate of announcement 501 should be deduplicated.
+                <String, Object>{
+                  'id': 9001,
+                  'announcement_id': 501,
+                  'type': 'Announcement',
+                  'title': 'Room Change Today',
+                  'message': 'Move to Room 302',
+                  'created_at': todayIso,
+                  'course_id': 10,
+                },
+                // Today's activity should be included.
+                <String, Object>{
+                  'id': 9002,
+                  'type': 'Submission',
+                  'title': 'Assignment 3 Graded',
+                  'message': '<p>Score posted</p>',
+                  'created_at': todayIso,
+                  'course_id': 10,
+                },
+                // Yesterday's activity MUST be discarded.
+                <String, Object>{
+                  'id': 9003,
+                  'type': 'DiscussionTopic',
+                  'title': 'Old Thread',
+                  'message': 'Yesterday post',
+                  'created_at': yesterdayIso,
+                  'course_id': 10,
+                },
+              ]),
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchTodayAnnouncementsAndActivities(
+        baseUrl: kDefaultCanvasBaseUrl,
+        token: oldToken,
+        now: nowLocal,
+      );
+
+      expect(items.length, 2);
+      expect(items.map((i) => i.title).toSet(), <String>{
+        'Room Change Today',
+        'Assignment 3 Graded',
+      });
+      expect(items.any((i) => i.title == 'Yesterday Reminder'), isFalse);
+      expect(items.any((i) => i.title == 'Old Thread'), isFalse);
+      expect(
+        items.firstWhere((i) => i.title == 'Room Change Today').message,
+        'Move to Room 302',
+      );
+      expect(
+        items.firstWhere((i) => i.title == 'Assignment 3 Graded').kind,
+        CanvasDailyItemKind.activity,
+      );
+    });
   });
 
   group('CanvasSettingsPage UI workflow', () {

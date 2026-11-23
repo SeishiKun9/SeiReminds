@@ -82,7 +82,7 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
       context: context,
       initialTime: TimeOfDay(hour: initial.hour, minute: initial.minute),
     );
-    if (picked == null) return;
+    if (!mounted || picked == null) return;
     setState(() {
       onPicked(ScheduleTime(hour: picked.hour, minute: picked.minute));
       _validationError = null;

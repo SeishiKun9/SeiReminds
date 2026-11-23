@@ -51,17 +51,31 @@ abstract class AuthService {
     String? displayName,
   });
 
+  Future<AuthActionResult> resendSignUpConfirmation(String email);
+
   Future<AuthActionResult> sendPasswordResetEmail(String email);
 
   Future<void> signOut();
 }
 
 class SupabaseAuthService implements AuthService {
-  SupabaseAuthService({this._authClient});
+  SupabaseAuthService({this._authClient, this.isAvailable = true});
 
   final GoTrueClient? _authClient;
+  final bool isAvailable;
 
-  GoTrueClient get _auth => _authClient ?? Supabase.instance.client.auth;
+  static const String _offlineAuthMessage =
+      'Online account service is unavailable offline. Schedules, events, history, and alarms still work offline.';
+
+  GoTrueClient? get _auth {
+    if (_authClient != null) return _authClient;
+    if (!isAvailable) return null;
+    try {
+      return Supabase.instance.client.auth;
+    } catch (_) {
+      return null;
+    }
+  }
 
   static AuthSessionUser? _fromSupabaseUser(User? user) {
     if (user == null) return null;
@@ -75,19 +89,30 @@ class SupabaseAuthService implements AuthService {
   }
 
   @override
-  AuthSessionUser? get currentUser => _fromSupabaseUser(_auth.currentUser);
+  AuthSessionUser? get currentUser => _fromSupabaseUser(_auth?.currentUser);
 
   @override
-  Stream<AuthSessionUser?> get onAuthStateChange =>
-      _auth.onAuthStateChange.map((state) => _fromSupabaseUser(state.session?.user));
+  Stream<AuthSessionUser?> get onAuthStateChange {
+    final auth = _auth;
+    if (auth == null) return const Stream<AuthSessionUser?>.empty();
+    return auth.onAuthStateChange
+        .map((state) => _fromSupabaseUser(state.session?.user));
+  }
 
   @override
   Future<AuthActionResult> signInWithPassword({
     required String email,
     required String password,
   }) async {
+    final auth = _auth;
+    if (auth == null) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: _offlineAuthMessage,
+      );
+    }
     try {
-      final response = await _auth.signInWithPassword(
+      final response = await auth.signInWithPassword(
         email: email.trim(),
         password: password,
       );
@@ -119,9 +144,16 @@ class SupabaseAuthService implements AuthService {
     required String password,
     String? displayName,
   }) async {
+    final auth = _auth;
+    if (auth == null) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: _offlineAuthMessage,
+      );
+    }
     try {
       final trimmedName = displayName?.trim() ?? '';
-      final response = await _auth.signUp(
+      final response = await auth.signUp(
         email: email.trim(),
         password: password,
         emailRedirectTo: SupabaseConfig.authRedirectUrl,
@@ -150,9 +182,53 @@ class SupabaseAuthService implements AuthService {
   }
 
   @override
-  Future<AuthActionResult> sendPasswordResetEmail(String email) async {
+  Future<AuthActionResult> resendSignUpConfirmation(String email) async {
+    final auth = _auth;
+    if (auth == null) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: _offlineAuthMessage,
+      );
+    }
+    final trimmed = email.trim();
+    if (trimmed.isEmpty) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'Enter your email address first.',
+      );
+    }
     try {
-      await _auth.resetPasswordForEmail(
+      await auth.resend(
+        type: OtpType.signup,
+        email: trimmed,
+        emailRedirectTo: SupabaseConfig.authRedirectUrl,
+      );
+      return const AuthActionResult(
+        succeeded: true,
+        message: 'Confirmation email resent. Check your inbox or spam folder.',
+      );
+    } on AuthException catch (e) {
+      return AuthActionResult(succeeded: false, message: e.message);
+    } catch (_) {
+      return const AuthActionResult(
+        succeeded: false,
+        message:
+            'Could not resend confirmation email. Check your internet connection.',
+      );
+    }
+  }
+
+  @override
+  Future<AuthActionResult> sendPasswordResetEmail(String email) async {
+    final auth = _auth;
+    if (auth == null) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: _offlineAuthMessage,
+      );
+    }
+    try {
+      await auth.resetPasswordForEmail(
         email.trim(),
         redirectTo: SupabaseConfig.authRedirectUrl,
       );
@@ -172,6 +248,6 @@ class SupabaseAuthService implements AuthService {
 
   @override
   Future<void> signOut() async {
-    await _auth.signOut();
+    await _auth?.signOut();
   }
 }

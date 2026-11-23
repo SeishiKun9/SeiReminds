@@ -22,7 +22,8 @@ class _CanvasSettingsPageState extends State<CanvasSettingsPage> {
   void initState() {
     super.initState();
     _urlController = TextEditingController(text: widget.viewModel.baseUrl);
-    widget.viewModel.load().then((_) {
+    Future.microtask(() async {
+      await widget.viewModel.load();
       if (mounted) {
         _urlController.text = widget.viewModel.baseUrl;
       }
@@ -140,18 +141,20 @@ class _CanvasSettingsPageState extends State<CanvasSettingsPage> {
     BuildContext context,
     CanvasConnectionStatus status,
   ) {
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     return switch (status) {
       CanvasConnectionStatus.connected ||
       CanvasConnectionStatus.replacementSuccessful =>
         (
-          bg: Colors.green.shade100,
-          fg: Colors.green.shade900,
+          bg: isDark ? const Color(0xFF143824) : const Color(0xFFDFF5E3),
+          fg: isDark ? const Color(0xFFA7F3D0) : const Color(0xFF0F5132),
           icon: Icons.check_circle_outline,
         ),
       CanvasConnectionStatus.expiringSoon => (
-          bg: Colors.amber.shade100,
-          fg: Colors.amber.shade900,
+          bg: isDark ? const Color(0xFF423007) : const Color(0xFFFFF3CD),
+          fg: isDark ? const Color(0xFFFDE68A) : const Color(0xFF664D03),
           icon: Icons.schedule_outlined,
         ),
       CanvasConnectionStatus.expired ||
@@ -306,6 +309,27 @@ class _CanvasSettingsPageState extends State<CanvasSettingsPage> {
                         ),
                       ),
                       const SizedBox(height: 14),
+                      if (vm.canSyncTodayUpdates) ...<Widget>[
+                        FilledButton.tonalIcon(
+                          key: const Key('sync_today_canvas_from_settings_button'),
+                          onPressed: vm.isBusy ? null : vm.syncTodayUpdates,
+                          icon: const Icon(Icons.campaign_outlined),
+                          label: const Text(
+                            'Sync Today\'s Announcements & Activities',
+                          ),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Only items posted today are shown and notified once. Previous days are cleared daily to save storage.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       FilledButton.icon(
                         key: const Key('replace_canvas_token_button'),
                         onPressed: vm.isBusy ? null : _openReplaceDialog,
@@ -471,6 +495,7 @@ class _ExpirationBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     final ({Color bg, Color fg, IconData icon}) palette =
         switch (assessment.level) {
@@ -484,8 +509,8 @@ class _ExpirationBanner extends StatelessWidget {
       TokenExpirationWarningLevel.threeDays ||
       TokenExpirationWarningLevel.sevenDays =>
         (
-          bg: Colors.amber.shade100,
-          fg: Colors.amber.shade900,
+          bg: isDark ? const Color(0xFF423007) : const Color(0xFFFFF3CD),
+          fg: isDark ? const Color(0xFFFDE68A) : const Color(0xFF664D03),
           icon: Icons.warning_amber_rounded,
         ),
       TokenExpirationWarningLevel.unverified => (
@@ -494,8 +519,8 @@ class _ExpirationBanner extends StatelessWidget {
           icon: Icons.info_outline,
         ),
       TokenExpirationWarningLevel.none => (
-          bg: Colors.green.shade50,
-          fg: Colors.green.shade900,
+          bg: isDark ? const Color(0xFF143824) : const Color(0xFFDFF5E3),
+          fg: isDark ? const Color(0xFFA7F3D0) : const Color(0xFF0F5132),
           icon: Icons.verified_user_outlined,
         ),
     };

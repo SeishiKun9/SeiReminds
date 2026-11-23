@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../../../domain/models/canvas_token_models.dart';
 import '../../../../domain/models/schedule_models.dart';
 import '../../../core/app_routes.dart';
 import '../../../core/app_theme.dart';
+import '../../auth/view_models/auth_view_model.dart';
 import '../../canvas/view_models/canvas_settings_view_model.dart';
 import '../view_models/schedule_view_model.dart';
 import 'alarm_setup_sheet.dart';
@@ -14,20 +16,39 @@ class ScheduleHomePage extends StatefulWidget {
     super.key,
     required this.viewModel,
     this.canvasViewModel,
+    this.authViewModel,
   });
 
   final ScheduleViewModel viewModel;
   final CanvasSettingsViewModel? canvasViewModel;
+  final AuthViewModel? authViewModel;
 
   @override
   State<ScheduleHomePage> createState() => _ScheduleHomePageState();
 }
 
-class _ScheduleHomePageState extends State<ScheduleHomePage> {
+class _ScheduleHomePageState extends State<ScheduleHomePage>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    widget.viewModel.initialize();
+    WidgetsBinding.instance.addObserver(this);
+    if (!widget.viewModel.hasInitialized) {
+      Future.microtask(widget.viewModel.initialize);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      widget.viewModel.checkDailyRolloverCleanup();
+    }
   }
 
   Future<void> _openClassForm({SubjectSchedule? existing}) async {
@@ -142,12 +163,24 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final listenables = <Listenable>[
+      widget.viewModel,
+      if (widget.canvasViewModel != null) widget.canvasViewModel!,
+      if (widget.authViewModel != null) widget.authViewModel!,
+    ];
+
     return ListenableBuilder(
-      listenable: widget.viewModel,
+      listenable: Listenable.merge(listenables),
       builder: (context, _) {
         final vm = widget.viewModel;
+        final cvm = widget.canvasViewModel;
+        final isSignedIn = widget.authViewModel?.isAuthenticated ?? true;
+        final showCanvasCard =
+            (isSignedIn && (cvm?.isConnected ?? false)) ||
+            vm.todayCanvasItems.isNotEmpty;
         final dayEvents = vm.selectedDayEvents;
         final daySessions = vm.selectedDaySessions;
+        final nextUp = vm.nextUpcomingSession;
 
         return Scaffold(
           appBar: AppBar(
@@ -160,19 +193,20 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
                 ),
                 const SizedBox(width: 8),
                 Container(
+                  key: const Key('official_version_badge'),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.secondaryContainer,
+                    color: theme.colorScheme.primaryContainer,
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    'Beta · Offline',
+                    'v1.0',
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSecondaryContainer,
-                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -266,7 +300,9 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
                                 ),
                               ),
                             )
-                          : (daySessions.isEmpty && dayEvents.isEmpty)
+                          : (daySessions.isEmpty &&
+                                  dayEvents.isEmpty &&
+                                  !showCanvasCard)
                           ? _EmptyDayView(
                               weekday: vm.selectedWeekday,
                               onAddPressed: () => _openClassForm(),
@@ -274,6 +310,38 @@ class _ScheduleHomePageState extends State<ScheduleHomePage> {
                           : ListView(
                               padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
                               children: <Widget>[
+                                if (nextUp != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 10),
+                                    child: _NextClassSummaryCard(
+                                      item: nextUp.item,
+                                      isInProgress: nextUp.isInProgress,
+                                      minutesUntilStart:
+                                          nextUp.minutesUntilStart,
+                                    ),
+                                  ),
+                                if (showCanvasCard)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 10),
+                                    child: _TodayCanvasUpdatesCard(
+                                      items: vm.todayCanvasItems,
+                                      isSyncing: vm.isSyncingCanvas,
+                                      statusMessage: vm.canvasSyncMessage,
+                                      onRefresh: (isSignedIn &&
+                                              cvm != null &&
+                                              cvm.canSyncTodayUpdates)
+                                          ? cvm.syncTodayUpdates
+                                          : null,
+                                    ),
+                                  ),
+                                if (daySessions.isEmpty && dayEvents.isEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 12),
+                                    child: _EmptyDayView(
+                                      weekday: vm.selectedWeekday,
+                                      onAddPressed: () => _openClassForm(),
+                                    ),
+                                  ),
                                 ...dayEvents.map((event) {
                                   final affected = vm
                                       .affectedSessionsForDayEvent(
@@ -883,6 +951,243 @@ class _AlertStrip extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _NextClassSummaryCard extends StatelessWidget {
+  const _NextClassSummaryCard({
+    required this.item,
+    required this.isInProgress,
+    required this.minutesUntilStart,
+  });
+
+  final DaySessionItem item;
+  final bool isInProgress;
+  final int minutesUntilStart;
+
+  String _formatLead() {
+    if (isInProgress) return 'In progress now';
+    if (minutesUntilStart < 60) return 'Starts in $minutesUntilStart min';
+    final hours = minutesUntilStart ~/ 60;
+    final mins = minutesUntilStart % 60;
+    return mins == 0 ? 'Starts in ${hours}h' : 'Starts in ${hours}h ${mins}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Card(
+      key: const Key('next_class_card'),
+      color: cs.primaryContainer.withValues(alpha: 0.72),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: <Widget>[
+            CircleAvatar(
+              backgroundColor: cs.primary,
+              foregroundColor: cs.onPrimary,
+              child: Icon(
+                isInProgress ? Icons.play_arrow_rounded : Icons.schedule,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '${isInProgress ? 'NOW' : 'UP NEXT'} · ${_formatLead()}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: cs.onPrimaryContainer,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${item.schedule.subject} · Sec ${item.schedule.section}',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: cs.onPrimaryContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    '${item.session.type.label} · ${item.session.formatTimeRange()}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: cs.onPrimaryContainer,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TodayCanvasUpdatesCard extends StatelessWidget {
+  const _TodayCanvasUpdatesCard({
+    required this.items,
+    required this.isSyncing,
+    this.statusMessage,
+    this.onRefresh,
+  });
+
+  final List<CanvasDailyItem> items;
+  final bool isSyncing;
+  final String? statusMessage;
+  final Future<void> Function()? onRefresh;
+
+  String _formatTime(DateTime utc) {
+    final local = utc.toLocal();
+    final hh = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final mm = local.minute.toString().padLeft(2, '0');
+    final period = local.hour >= 12 ? 'PM' : 'AM';
+    return '$hh:$mm $period';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Card(
+      key: const Key('today_canvas_updates_card'),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.school_outlined, color: cs.primary, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Today\'s Canvas Updates (${items.length})',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (onRefresh != null)
+                  IconButton(
+                    key: const Key('sync_today_canvas_button'),
+                    tooltip: 'Refresh today\'s Canvas announcements & activities',
+                    onPressed: isSyncing ? null : () => onRefresh!(),
+                    icon: isSyncing
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh, size: 20),
+                  ),
+              ],
+            ),
+            Text(
+              'Only announcements & activities posted today are shown. Previous days clear daily.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            if (statusMessage != null && items.isEmpty) ...<Widget>[
+              const SizedBox(height: 6),
+              Text(
+                statusMessage!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.primary,
+                ),
+              ),
+            ],
+            if (items.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 10),
+              ...items.map(
+                (item) => Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: item.kind ==
+                                      CanvasDailyItemKind.announcement
+                                  ? cs.tertiaryContainer
+                                  : cs.secondaryContainer,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              item.kind.label,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: item.kind ==
+                                        CanvasDailyItemKind.announcement
+                                    ? cs.onTertiaryContainer
+                                    : cs.onSecondaryContainer,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              item.courseName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            _formatTime(item.postedAt),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        item.title,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (item.message.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 2),
+                        Text(
+                          item.message,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

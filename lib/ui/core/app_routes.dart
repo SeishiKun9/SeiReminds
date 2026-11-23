@@ -1,4 +1,7 @@
-/// Centralized route definitions and authentication route guard.
+/// Centralized route definitions and offline-first authentication route guard.
+///
+/// Non-Canvas routes ([home], [settings]) work fully offline without sign-in.
+/// Online Canvas routes ([canvasSettings]) require an authenticated Supabase session.
 class AppRoutes {
   static const String home = '/';
   static const String login = '/login';
@@ -6,18 +9,27 @@ class AppRoutes {
   static const String settings = '/settings';
   static const String canvasSettings = '/settings/canvas';
 
-  static const Set<String> publicRoutes = <String>{login, signUp};
+  static const Set<String> authRoutes = <String>{login, signUp};
 
-  static const Set<String> protectedRoutes = <String>{
+  static const Set<String> offlineRoutes = <String>{home, settings};
+
+  static const Set<String> publicRoutes = <String>{
     home,
     settings,
-    canvasSettings,
+    login,
+    signUp,
   };
+
+  static const Set<String> protectedRoutes = <String>{canvasSettings};
 
   static bool isPublic(String routeName) => publicRoutes.contains(routeName);
 
-  /// Enforces protected-route access control:
-  /// - Unauthenticated requests to any protected/unknown route redirect to [login].
+  static bool isProtected(String routeName) =>
+      protectedRoutes.contains(routeName);
+
+  /// Enforces offline-first route access control:
+  /// - Offline routes ([home], [settings]) are accessible with or without auth.
+  /// - Protected Canvas routes ([canvasSettings]) redirect to [login] when signed out.
   /// - Authenticated requests to [login] or [signUp] redirect to [home].
   static String resolveAuthorizedRoute(
     String? requestedRoute, {
@@ -28,13 +40,20 @@ class AppRoutes {
         : requestedRoute;
 
     if (!isAuthenticated) {
-      return isPublic(normalized) ? normalized : login;
-    }
-
-    if (isPublic(normalized) || !protectedRoutes.contains(normalized)) {
+      if (isProtected(normalized)) return login;
+      if (offlineRoutes.contains(normalized) ||
+          authRoutes.contains(normalized)) {
+        return normalized;
+      }
       return home;
     }
 
-    return normalized;
+    if (authRoutes.contains(normalized)) {
+      return home;
+    }
+    if (offlineRoutes.contains(normalized) || isProtected(normalized)) {
+      return normalized;
+    }
+    return home;
   }
 }

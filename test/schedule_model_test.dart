@@ -5,11 +5,14 @@ import 'package:path/path.dart' as p;
 import 'package:seireminds/data/repositories/schedule_repository.dart';
 import 'package:seireminds/data/services/alarm_service.dart';
 import 'package:seireminds/data/services/sqlite_database_service.dart';
+import 'package:seireminds/domain/models/canvas_token_models.dart';
 import 'package:seireminds/domain/models/schedule_models.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _FakeAlarmService implements AlarmService {
   List<ScheduledAlarmPayload> lastSynced = const <ScheduledAlarmPayload>[];
+  final List<({int id, String title, String body})> canvasNotifications =
+      <({int id, String title, String body})>[];
   bool shouldFailSync = false;
 
   @override
@@ -18,6 +21,15 @@ class _FakeAlarmService implements AlarmService {
       throw Exception('AlarmManager unavailable');
     }
     lastSynced = List<ScheduledAlarmPayload>.of(alarms);
+  }
+
+  @override
+  Future<void> showCanvasNotification({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    canvasNotifications.add((id: id, title: title, body: body));
   }
 
   @override
@@ -554,5 +566,162 @@ void main() {
         await repo.close();
       }
     });
+
+    test('findNextUpcomingSession skips canceled sessions and detects in-progress class', () {
+      final schedule = SubjectSchedule(
+        id: 's1',
+        subject: 'Algorithms',
+        section: 'A',
+        sessions: <SessionType, SessionSchedule>{
+          SessionType.lecture: SessionSchedule(
+            type: SessionType.lecture,
+            days: const <int>[DateTime.monday],
+            timeIn: const ScheduleTime(hour: 9, minute: 0),
+            timeOut: const ScheduleTime(hour: 10, minute: 30),
+          ),
+          SessionType.laboratory: SessionSchedule(
+            type: SessionType.laboratory,
+            days: const <int>[DateTime.monday],
+            timeIn: const ScheduleTime(hour: 13, minute: 0),
+            timeOut: const ScheduleTime(hour: 15, minute: 0),
+          ),
+        },
+      );
+      final morningCancelEvent = EventSchedule(
+        id: 'e1',
+        title: 'Convocation',
+        days: const <int>[DateTime.monday],
+        period: EventPeriod.morning,
+        morningTimeIn: const ScheduleTime(hour: 8, minute: 0),
+        morningTimeOut: const ScheduleTime(hour: 11, minute: 0),
+      );
+
+      // Monday 8:30 AM -> Morning Lecture is canceled, so next up is 1:00 PM Lab.
+      final next = findNextUpcomingSession(
+        <SubjectSchedule>[schedule],
+        <EventSchedule>[morningCancelEvent],
+        now: DateTime(2026, 11, 23, 8, 30),
+      );
+      expect(next, isNotNull);
+      expect(next!.item.session.type, SessionType.laboratory);
+      expect(next.isInProgress, isFalse);
+      expect(next.minutesUntilStart, 270);
+
+      // Monday 1:30 PM -> Lab is in progress.
+      final active = findNextUpcomingSession(
+        <SubjectSchedule>[schedule],
+        <EventSchedule>[morningCancelEvent],
+        now: DateTime(2026, 11, 23, 13, 30),
+      );
+      expect(active, isNotNull);
+      expect(active!.isInProgress, isTrue);
+      expect(active.minutesUntilStart, 0);
+    });
+
+    test(
+      'daily storage cleanup clears yesterday Canvas data while protecting schedules, and only posts/notifies current-day items once',
+      () async {
+        var now = DateTime(2026, 11, 23, 10, 0);
+        final db = _createInMemoryDb();
+        final alarmService = _FakeAlarmService();
+        final repo = ScheduleRepository(
+          database: db,
+          alarmService: alarmService,
+          clock: () => now,
+        );
+
+        try {
+          // Save an active schedule that MUST NEVER be deleted by daily cleanup.
+          await repo.saveSchedule(
+            SubjectSchedule(
+              id: 'protected-sched',
+              subject: 'Networks',
+              section: 'A',
+              sessions: <SessionType, SessionSchedule>{
+                SessionType.lecture: SessionSchedule(
+                  type: SessionType.lecture,
+                  days: const <int>[DateTime.monday],
+                  timeIn: const ScheduleTime(hour: 8, minute: 0),
+                  timeOut: const ScheduleTime(hour: 9, minute: 30),
+                ),
+              },
+            ),
+            isNew: true,
+          );
+
+          final todayAnn = CanvasDailyItem(
+            id: 'ann_100',
+            kind: CanvasDailyItemKind.announcement,
+            courseName: 'Networks',
+            title: 'Quiz Today',
+            message: 'Bring calculator.',
+            postedAt: DateTime(2026, 11, 23, 9, 15).toUtc(),
+            postedDate: localDateKey(now),
+          );
+          final todayAct = CanvasDailyItem(
+            id: 'act_200',
+            kind: CanvasDailyItemKind.activity,
+            courseName: 'Networks',
+            title: 'Lab 4 Posted',
+            message: 'Submit by 5 PM.',
+            postedAt: DateTime(2026, 11, 23, 8, 45).toUtc(),
+            postedDate: localDateKey(now),
+          );
+          final yesterdayAnn = CanvasDailyItem(
+            id: 'ann_old',
+            kind: CanvasDailyItemKind.announcement,
+            courseName: 'Networks',
+            title: 'Yesterday Notice',
+            message: 'Must not be posted or notified today.',
+            postedAt: DateTime(2026, 11, 22, 23, 55).toUtc(),
+            postedDate: localDateKey(DateTime(2026, 11, 22)),
+          );
+
+          // First sync on Nov 23: ONLY today's 2 items are stored and notified!
+          final firstSync = await repo.syncTodayCanvasItems(<CanvasDailyItem>[
+            todayAnn,
+            todayAct,
+            yesterdayAnn,
+          ]);
+          expect(firstSync.todayItems.length, 2);
+          expect(
+            firstSync.todayItems.any((i) => i.id == 'ann_old'),
+            isFalse,
+          );
+          expect(firstSync.newlyNotifiedCount, 2);
+          expect(alarmService.canvasNotifications.length, 2);
+
+          // Second sync later on Nov 23: does NOT re-notify already notified today items!
+          final secondSync = await repo.syncTodayCanvasItems(<CanvasDailyItem>[
+            todayAnn,
+            todayAct,
+            yesterdayAnn,
+          ]);
+          expect(secondSync.todayItems.length, 2);
+          expect(secondSync.newlyNotifiedCount, 0);
+          expect(alarmService.canvasNotifications.length, 2);
+
+          // Advance to next day (Nov 24): daily cleanup deletes Nov 23 items to save storage,
+          // keeps saved schedules untouched, and NEVER re-posts or re-notifies Nov 23 items!
+          now = DateTime(2026, 11, 24, 7, 30);
+          final nextDaySnapshot = await repo.loadAllAndSync();
+          expect(nextDaySnapshot.todayCanvasItems, isEmpty);
+          expect(nextDaySnapshot.lastDailyCleanupDate, '2026-11-24');
+          expect(nextDaySnapshot.lastDailyCleanupRemoved, 2);
+          expect(nextDaySnapshot.schedules.length, 1);
+
+          // Even if Canvas returns Nov 23 items on Nov 24, they are NOT re-posted or re-notified.
+          final nextDaySync = await repo.syncTodayCanvasItems(<CanvasDailyItem>[
+            todayAnn,
+            todayAct,
+          ]);
+          expect(nextDaySync.todayItems, isEmpty);
+          expect(nextDaySync.newlyNotifiedCount, 0);
+          expect(alarmService.canvasNotifications.length, 2);
+        } finally {
+          await repo.close();
+        }
+      },
+    );
   });
 }

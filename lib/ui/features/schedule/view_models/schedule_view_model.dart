@@ -1,18 +1,23 @@
 import 'package:flutter/foundation.dart';
 
+import '../../../../data/repositories/canvas_token_repository.dart';
 import '../../../../data/repositories/schedule_repository.dart';
 import '../../../../data/services/alarm_service.dart';
+import '../../../../domain/models/canvas_token_models.dart';
 import '../../../../domain/models/schedule_models.dart';
 
 class ScheduleViewModel extends ChangeNotifier {
   ScheduleViewModel({
     required this._repository,
     int? initialWeekday,
-  }) : _selectedWeekday = _clampToSchoolDay(
-          initialWeekday ?? DateTime.now().weekday,
+    DateTime Function()? clock,
+  })  : _clock = clock ?? DateTime.now,
+        _selectedWeekday = _clampToSchoolDay(
+          initialWeekday ?? (clock ?? DateTime.now)().weekday,
         );
 
   final ScheduleRepository _repository;
+  final DateTime Function() _clock;
 
   List<SubjectSchedule> _schedules = const <SubjectSchedule>[];
   List<SubjectSchedule> get schedules => _schedules;
@@ -26,8 +31,26 @@ class ScheduleViewModel extends ChangeNotifier {
   List<HistoryEntry> _archivedHistory = const <HistoryEntry>[];
   List<HistoryEntry> get archivedHistory => _archivedHistory;
 
+  List<CanvasDailyItem> _todayCanvasItems = const <CanvasDailyItem>[];
+  List<CanvasDailyItem> get todayCanvasItems => _todayCanvasItems;
+
+  String? _lastDailyCleanupDate;
+  String? get lastDailyCleanupDate => _lastDailyCleanupDate;
+
+  int _lastDailyCleanupRemoved = 0;
+  int get lastDailyCleanupRemoved => _lastDailyCleanupRemoved;
+
+  bool _isSyncingCanvas = false;
+  bool get isSyncingCanvas => _isSyncingCanvas;
+
+  String? _canvasSyncMessage;
+  String? get canvasSyncMessage => _canvasSyncMessage;
+
   int _selectedWeekday;
   int get selectedWeekday => _selectedWeekday;
+
+  bool _hasInitialized = false;
+  bool get hasInitialized => _hasInitialized;
 
   bool _isLoading = true;
   bool get isLoading => _isLoading;
@@ -47,6 +70,10 @@ class ScheduleViewModel extends ChangeNotifier {
 
   List<EventSchedule> get selectedDayEvents =>
       eventsForWeekday(_events, _selectedWeekday);
+
+  ({DaySessionItem item, bool isInProgress, int minutesUntilStart})?
+      get nextUpcomingSession =>
+          findNextUpcomingSession(_schedules, _events, now: _clock());
 
   int sessionCountForDay(int weekday) =>
       sessionsForWeekday(_schedules, weekday).length;
@@ -84,11 +111,15 @@ class ScheduleViewModel extends ChangeNotifier {
     _events = snapshot.events;
     _activeHistory = snapshot.activeHistory;
     _archivedHistory = snapshot.archivedHistory;
+    _todayCanvasItems = snapshot.todayCanvasItems;
+    _lastDailyCleanupDate = snapshot.lastDailyCleanupDate;
+    _lastDailyCleanupRemoved = snapshot.lastDailyCleanupRemoved;
     _bannerMessage = snapshot.alarmSyncWarning;
     _errorMessage = null;
   }
 
   Future<void> initialize() async {
+    _hasInitialized = true;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -103,6 +134,85 @@ class ScheduleViewModel extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  /// Runs daily cleanup automatically when the local calendar day rolls over.
+  Future<void> checkDailyRolloverCleanup() async {
+    if (!_hasInitialized) return;
+    final todayKey = localDateKey(_clock());
+    if (_lastDailyCleanupDate == todayKey) return;
+    await runDailyStorageCleanup();
+  }
+
+  Future<DailyCleanupResult?> runDailyStorageCleanup() async {
+    try {
+      final result = await _repository.runDailyStorageCleanup();
+      _applySnapshot(result.snapshot);
+      notifyListeners();
+      return result.cleanup;
+    } catch (e) {
+      _bannerMessage = 'Daily storage cleanup failed: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// Fetches and stores ONLY today's Canvas announcements & activities,
+  /// clears yesterday's cache, and posts notifications only for new today items.
+  Future<CanvasTodaySyncResult> syncTodayCanvasUpdates(
+    CanvasTokenRepository canvasRepository,
+  ) async {
+    if (_isSyncingCanvas) {
+      return CanvasTodaySyncResult(
+        succeeded: false,
+        message: 'Canvas sync is already in progress.',
+        todayItems: _todayCanvasItems,
+        newlyNotifiedCount: 0,
+        clearedStaleCount: 0,
+      );
+    }
+
+    _isSyncingCanvas = true;
+    notifyListeners();
+
+    try {
+      final fetched = await canvasRepository.fetchTodayUpdates(now: _clock());
+      final result = await _repository.syncTodayCanvasItems(fetched);
+      _todayCanvasItems = result.todayItems;
+      _lastDailyCleanupDate = localDateKey(_clock());
+      _canvasSyncMessage = result.message;
+      return result;
+    } on CanvasApiException catch (e) {
+      _canvasSyncMessage = e.message;
+      return CanvasTodaySyncResult(
+        succeeded: false,
+        message: e.message,
+        todayItems: _todayCanvasItems,
+        newlyNotifiedCount: 0,
+        clearedStaleCount: 0,
+      );
+    } catch (_) {
+      const msg =
+          'Could not sync Canvas updates right now. Offline schedules remain unaffected.';
+      _canvasSyncMessage = msg;
+      return CanvasTodaySyncResult(
+        succeeded: false,
+        message: msg,
+        todayItems: _todayCanvasItems,
+        newlyNotifiedCount: 0,
+        clearedStaleCount: 0,
+      );
+    } finally {
+      _isSyncingCanvas = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> clearCanvasDailyCache() async {
+    await _repository.clearCanvasDailyCache();
+    _todayCanvasItems = const <CanvasDailyItem>[];
+    _canvasSyncMessage = null;
+    notifyListeners();
   }
 
   void selectWeekday(int weekday) {

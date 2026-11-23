@@ -116,6 +116,168 @@ class CanvasApiClient {
     );
   }
 
+  /// Fetches Canvas announcements and activity stream items posted ONLY on the
+  /// current local day. Items from yesterday or earlier are strictly discarded.
+  Future<List<CanvasDailyItem>> fetchTodayAnnouncementsAndActivities({
+    required String baseUrl,
+    required String token,
+    DateTime? now,
+  }) async {
+    final normalizedBase = normalizeCanvasBaseUrl(baseUrl);
+    final trimmedToken = token.trim();
+    if (trimmedToken.isEmpty) {
+      throw const CanvasApiException(
+        'API token cannot be empty.',
+        isAuthFailure: true,
+      );
+    }
+
+    final current = now ?? DateTime.now();
+    final todayKey = localDateKey(current);
+    final headers = _authHeaders(trimmedToken);
+
+    // 1. Load active courses so we can resolve course names and query announcements.
+    final coursesResponse = await _safeGet(
+      Uri.parse(
+        '$normalizedBase/api/v1/courses?enrollment_state=active&per_page=50',
+      ),
+      headers: headers,
+    );
+    _assertSuccess(
+      coursesResponse,
+      contextLabel: 'Canvas courses fetch',
+    );
+    final coursesList = _decodeJsonList(
+      coursesResponse.body,
+      contextLabel: 'Canvas courses response',
+    );
+
+    final courseNames = <String, String>{};
+    final contextCodes = <String>[];
+    for (final raw in coursesList.whereType<Map<String, dynamic>>()) {
+      final id = raw['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      final name = (raw['name'] as String?)?.trim() ??
+          (raw['course_code'] as String?)?.trim() ??
+          'Course $id';
+      courseNames[id] = name;
+      if (contextCodes.length < 20) {
+        contextCodes.add('course_$id');
+      }
+    }
+
+    final itemsById = <String, CanvasDailyItem>{};
+    final seenAnnouncementIds = <String>{};
+
+    // 2. Fetch course announcements for today and filter strictly by local current day.
+    if (contextCodes.isNotEmpty) {
+      final queryParts = <String>[
+        for (final code in contextCodes)
+          'context_codes[]=${Uri.encodeQueryComponent(code)}',
+        'start_date=${Uri.encodeQueryComponent(todayKey)}',
+        'end_date=${Uri.encodeQueryComponent(todayKey)}',
+        'per_page=50',
+      ];
+      final announcementsUri = Uri.parse(
+        '$normalizedBase/api/v1/announcements?${queryParts.join('&')}',
+      );
+      final annResponse = await _safeGet(announcementsUri, headers: headers);
+      _assertSuccess(annResponse, contextLabel: 'Canvas announcements fetch');
+      final annList = _decodeJsonList(
+        annResponse.body,
+        contextLabel: 'Canvas announcements response',
+      );
+
+      for (final raw in annList.whereType<Map<String, dynamic>>()) {
+        final rawId = raw['id']?.toString() ?? '';
+        final postedRaw =
+            (raw['posted_at'] as String?) ?? (raw['created_at'] as String?);
+        if (rawId.isEmpty || postedRaw == null) continue;
+        final postedAt = DateTime.tryParse(postedRaw)?.toUtc();
+        if (postedAt == null || !isPostedOnCurrentDay(postedAt, now: current)) {
+          continue;
+        }
+
+        final contextCode = (raw['context_code'] as String?) ?? '';
+        final courseId = contextCode.startsWith('course_')
+            ? contextCode.substring('course_'.length)
+            : '';
+        final courseName = courseNames[courseId] ?? 'Canvas Course';
+        final title = (raw['title'] as String?)?.trim();
+        final message = stripCanvasHtml((raw['message'] as String?) ?? '');
+        final canonicalId = 'ann_$rawId';
+        seenAnnouncementIds.add(rawId);
+
+        itemsById[canonicalId] = CanvasDailyItem(
+          id: canonicalId,
+          kind: CanvasDailyItemKind.announcement,
+          courseName: courseName,
+          title: (title != null && title.isNotEmpty) ? title : 'Announcement',
+          message: message,
+          postedAt: postedAt,
+          postedDate: todayKey,
+        );
+      }
+    }
+
+    // 3. Fetch personal activity stream for today's activities (submissions, assignments, discussions, etc.).
+    final streamResponse = await _safeGet(
+      Uri.parse('$normalizedBase/api/v1/users/self/activity_stream?per_page=50'),
+      headers: headers,
+    );
+    _assertSuccess(streamResponse, contextLabel: 'Canvas activity stream fetch');
+    final streamList = _decodeJsonList(
+      streamResponse.body,
+      contextLabel: 'Canvas activity stream response',
+    );
+
+    for (final raw in streamList.whereType<Map<String, dynamic>>()) {
+      final rawId = raw['id']?.toString() ?? '';
+      // Prefer created_at (when the activity was sent); fall back to updated_at only if absent.
+      final sentRaw =
+          (raw['created_at'] as String?) ?? (raw['updated_at'] as String?);
+      if (rawId.isEmpty || sentRaw == null) continue;
+      final postedAt = DateTime.tryParse(sentRaw)?.toUtc();
+      if (postedAt == null || !isPostedOnCurrentDay(postedAt, now: current)) {
+        continue;
+      }
+
+      final typeRaw = (raw['type'] as String?)?.trim() ?? 'Activity';
+      final isAnnouncement = typeRaw.toLowerCase() == 'announcement';
+      final linkedAnnouncementId = raw['announcement_id']?.toString() ?? rawId;
+      if (isAnnouncement && seenAnnouncementIds.contains(linkedAnnouncementId)) {
+        continue;
+      }
+
+      final courseId = raw['course_id']?.toString() ?? '';
+      final courseName = courseNames[courseId] ?? 'Canvas';
+      final title = (raw['title'] as String?)?.trim();
+      final message = stripCanvasHtml((raw['message'] as String?) ?? '');
+      final canonicalId = isAnnouncement
+          ? 'ann_$linkedAnnouncementId'
+          : 'act_${typeRaw.toLowerCase()}_$rawId';
+
+      itemsById.putIfAbsent(
+        canonicalId,
+        () => CanvasDailyItem(
+          id: canonicalId,
+          kind: isAnnouncement
+              ? CanvasDailyItemKind.announcement
+              : CanvasDailyItemKind.activity,
+          courseName: courseName,
+          title: (title != null && title.isNotEmpty) ? title : typeRaw,
+          message: message,
+          postedAt: postedAt,
+          postedDate: todayKey,
+        ),
+      );
+    }
+
+    final result = itemsById.values.toList()
+      ..sort((a, b) => b.postedAt.compareTo(a.postedAt));
+    return result;
+  }
+
   /// Lightweight confirmation check executed after saving a replacement token
   /// to confirm the saved token works before deleting the previous token.
   Future<void> confirmTokenWorking({

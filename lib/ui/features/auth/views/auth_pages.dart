@@ -89,7 +89,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Sign in to access your class schedule, silent-bypass alarms, and Canvas settings.',
+                          'Sign in for Canvas settings and online sync. Schedules, events, history, and alarms work offline.',
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
@@ -193,6 +193,24 @@ class _LoginPageState extends State<LoginPage> {
                               child: const Text('Create Account'),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          key: const Key('continue_offline_button'),
+                          onPressed: vm.isBusy
+                              ? null
+                              : () {
+                                  vm.clearMessages();
+                                  Navigator.of(context).pushNamedAndRemoveUntil(
+                                    AppRoutes.home,
+                                    (_) => false,
+                                  );
+                                },
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(46),
+                          ),
+                          icon: const Icon(Icons.cloud_off_outlined, size: 18),
+                          label: const Text('Continue Offline (Schedules & Alarms)'),
                         ),
                       ],
                     ),
@@ -361,6 +379,38 @@ class _SignUpPageState extends State<SignUpPage> {
                                 )
                               : const Text('Create Account'),
                         ),
+                        if (vm.pendingConfirmationEmail != null) ...<Widget>[
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            key: const Key('auth_resend_confirmation_button'),
+                            onPressed: vm.isBusy || !vm.canResendConfirmation
+                                ? null
+                                : vm.resendSignUpConfirmation,
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(48),
+                            ),
+                            icon: const Icon(
+                              Icons.mark_email_unread_outlined,
+                              size: 18,
+                            ),
+                            label: Text(
+                              vm.canResendConfirmation
+                                  ? 'Resend Confirmation Email (${vm.confirmationResendsRemaining} left)'
+                                  : 'Resend Limit Reached (0/${AuthViewModel.maxConfirmationResends})',
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            vm.canResendConfirmation
+                                ? 'Confirmation email pending for ${vm.pendingConfirmationEmail}.'
+                                : 'Maximum ${AuthViewModel.maxConfirmationResends} resends reached for ${vm.pendingConfirmationEmail}. Check your spam folder or sign in once confirmed.',
+                            key: const Key('auth_resend_confirmation_hint'),
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 12),
                         TextButton(
                           onPressed: vm.isBusy
@@ -395,29 +445,33 @@ class _AuthBanner extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final bg = isError ? cs.errorContainer : cs.secondaryContainer;
     final fg = isError ? cs.onErrorContainer : cs.onSecondaryContainer;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(
-            isError ? Icons.error_outline : Icons.check_circle_outline,
-            color: fg,
-            size: 20,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: TextStyle(color: fg, fontSize: 13),
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(
+              isError ? Icons.error_outline : Icons.check_circle_outline,
+              color: fg,
+              size: 20,
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: fg, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

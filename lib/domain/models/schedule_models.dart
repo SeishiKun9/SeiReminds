@@ -908,3 +908,36 @@ List<ScheduledAlarmPayload> buildAlarmPayloads(
 
   return payloads;
 }
+
+/// Finds the current or next non-canceled class session for today (Mon–Sat).
+({DaySessionItem item, bool isInProgress, int minutesUntilStart})?
+findNextUpcomingSession(
+  List<SubjectSchedule> schedules,
+  List<EventSchedule> events, {
+  DateTime? now,
+}) {
+  final current = (now ?? DateTime.now()).toLocal();
+  if (current.weekday < DateTime.monday ||
+      current.weekday > DateTime.saturday) {
+    return null;
+  }
+
+  final nowMinutes = current.hour * 60 + current.minute;
+  for (final item in sessionsForWeekday(schedules, current.weekday)) {
+    if (conflictingEventsForSession(events, current.weekday, item.session)
+        .isNotEmpty) {
+      continue;
+    }
+    if (item.session.timeOut.totalMinutes > nowMinutes) {
+      final isInProgress = item.session.timeIn.totalMinutes <= nowMinutes;
+      final minutesUntilStart =
+          isInProgress ? 0 : item.session.timeIn.totalMinutes - nowMinutes;
+      return (
+        item: item,
+        isInProgress: isInProgress,
+        minutesUntilStart: minutesUntilStart,
+      );
+    }
+  }
+  return null;
+}

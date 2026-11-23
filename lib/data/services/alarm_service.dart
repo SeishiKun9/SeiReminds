@@ -34,6 +34,11 @@ class AlarmPermissionStatus {
 
 abstract class AlarmService {
   Future<void> syncAlarms(List<ScheduledAlarmPayload> alarms);
+  Future<void> showCanvasNotification({
+    required int id,
+    required String title,
+    required String body,
+  });
   Future<void> triggerTestAlarm();
   Future<void> stopActiveAlarm();
   Future<AlarmPermissionStatus> getPermissionStatus();
@@ -59,6 +64,27 @@ class MethodChannelAlarmService implements AlarmService {
         'syncAlarms',
         <String, Object>{
           'alarms': alarms.map((a) => a.toMap()).toList(),
+        },
+      );
+    } on MissingPluginException {
+      // Non-Android / widget test environment without native channel registered.
+    }
+  }
+
+  @override
+  Future<void> showCanvasNotification({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    if (!_isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>(
+        'showCanvasNotification',
+        <String, Object>{
+          'id': id,
+          'title': title,
+          'body': body,
         },
       );
     } on MissingPluginException {

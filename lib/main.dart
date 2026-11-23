@@ -21,10 +21,16 @@ import 'ui/features/schedule/views/settings_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Supabase.initialize(
-    url: SupabaseConfig.url,
-    publishableKey: SupabaseConfig.publishableKey,
-  );
+  var supabaseReady = false;
+  try {
+    await Supabase.initialize(
+      url: SupabaseConfig.url,
+      publishableKey: SupabaseConfig.publishableKey,
+    );
+    supabaseReady = true;
+  } catch (_) {
+    // Allow full offline operation even when Supabase cannot initialize.
+  }
 
   final repository = ScheduleRepository(
     database: SqliteScheduleDatabase(),
@@ -34,7 +40,7 @@ Future<void> main() async {
     store: FlutterSecureKeyValueStore(),
     apiClient: CanvasApiClient(),
   );
-  final authService = SupabaseAuthService();
+  final authService = SupabaseAuthService(isAvailable: supabaseReady);
 
   runApp(
     SeiRemindsApp(
@@ -71,6 +77,7 @@ class _SeiRemindsAppState extends State<SeiRemindsApp> {
   CanvasSettingsViewModel? _canvasViewModel;
   AuthViewModel? _authViewModel;
   bool _wasAuthenticated = false;
+  String? _pendingProtectedRoute;
 
   bool get _isAuthenticated => _authViewModel?.isAuthenticated ?? true;
 
@@ -81,15 +88,26 @@ class _SeiRemindsAppState extends State<SeiRemindsApp> {
       repository: widget.repository,
       initialWeekday: widget.initialWeekday,
     );
+    Future.microtask(_viewModel.initialize);
     if (widget.canvasRepository != null) {
+      final canvasRepo = widget.canvasRepository!;
       _canvasViewModel = CanvasSettingsViewModel(
-        repository: widget.canvasRepository!,
-      )..load();
+        repository: canvasRepo,
+        onSyncTodayUpdates: () => _viewModel.syncTodayCanvasUpdates(canvasRepo),
+        onDisconnected: _viewModel.clearCanvasDailyCache,
+      );
+      Future.microtask(_canvasViewModel!.load);
     }
     if (widget.authService != null) {
       _authViewModel = AuthViewModel(authService: widget.authService!);
       _wasAuthenticated = _authViewModel!.isAuthenticated;
       _authViewModel!.addListener(_handleAuthChange);
+    }
+    final requestedInitial = widget.initialRoute;
+    if (!_isAuthenticated &&
+        requestedInitial != null &&
+        AppRoutes.isProtected(requestedInitial)) {
+      _pendingProtectedRoute = requestedInitial;
     }
   }
 
@@ -100,18 +118,35 @@ class _SeiRemindsAppState extends State<SeiRemindsApp> {
     if (nowAuthenticated == _wasAuthenticated) return;
     _wasAuthenticated = nowAuthenticated;
 
-    // Immediately reset the entire navigation stack on sign-in or sign-out
-    // so no protected route remains reachable via back navigation.
-    final targetRoute = nowAuthenticated ? AppRoutes.home : AppRoutes.login;
-    _navigatorKey.currentState?.pushNamedAndRemoveUntil(
-      targetRoute,
-      (_) => false,
-    );
+    final nav = _navigatorKey.currentState;
+    if (nav == null) return;
+
+    if (nowAuthenticated) {
+      final pending = _pendingProtectedRoute;
+      _pendingProtectedRoute = null;
+      nav.pushNamedAndRemoveUntil(AppRoutes.home, (_) => false);
+      if (pending != null && pending != AppRoutes.home) {
+        nav.pushNamed(pending);
+      }
+      return;
+    }
+
+    // On sign-out or session expiry, immediately remove any protected Canvas
+    // route from the stack while keeping the offline timetable accessible.
+    _pendingProtectedRoute = null;
+    nav.pushNamedAndRemoveUntil(AppRoutes.home, (_) => false);
   }
 
   Route<dynamic> _onGenerateRoute(RouteSettings settings) {
+    final requested = settings.name;
+    if (!_isAuthenticated &&
+        requested != null &&
+        AppRoutes.isProtected(requested)) {
+      _pendingProtectedRoute = requested;
+    }
+
     final resolved = AppRoutes.resolveAuthorizedRoute(
-      settings.name,
+      requested,
       isAuthenticated: _isAuthenticated,
     );
 
@@ -139,6 +174,7 @@ class _SeiRemindsAppState extends State<SeiRemindsApp> {
         page = ScheduleHomePage(
           viewModel: _viewModel,
           canvasViewModel: _canvasViewModel,
+          authViewModel: _authViewModel,
         );
     }
 
@@ -154,6 +190,7 @@ class _SeiRemindsAppState extends State<SeiRemindsApp> {
     _authViewModel?.dispose();
     _viewModel.dispose();
     _canvasViewModel?.dispose();
+    widget.canvasRepository?.dispose();
     super.dispose();
   }
 

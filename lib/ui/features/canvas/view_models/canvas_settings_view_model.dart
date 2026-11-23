@@ -7,10 +7,16 @@ class CanvasSettingsViewModel extends ChangeNotifier {
   CanvasSettingsViewModel({
     required this._repository,
     DateTime Function()? clock,
+    this._onSyncTodayUpdates,
+    this._onDisconnected,
   }) : _clock = clock ?? DateTime.now;
 
   final CanvasTokenRepository _repository;
   final DateTime Function() _clock;
+  final Future<CanvasTodaySyncResult> Function()? _onSyncTodayUpdates;
+  final Future<void> Function()? _onDisconnected;
+
+  bool get canSyncTodayUpdates => _onSyncTodayUpdates != null;
 
   String _baseUrl = kDefaultCanvasBaseUrl;
   String get baseUrl => _baseUrl;
@@ -151,11 +157,31 @@ class CanvasSettingsViewModel extends ChangeNotifier {
     }
   }
 
+  Future<CanvasTodaySyncResult?> syncTodayUpdates() async {
+    final handler = _onSyncTodayUpdates;
+    if (handler == null) return null;
+    _isBusy = true;
+    _lastOperationStatus = null;
+    _feedbackMessage = null;
+    _feedbackIsError = false;
+    notifyListeners();
+    try {
+      final result = await handler();
+      _feedbackMessage = result.message;
+      _feedbackIsError = !result.succeeded;
+      return result;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> disconnect() async {
     _isBusy = true;
     notifyListeners();
     try {
       await _repository.disconnect();
+      await _onDisconnected?.call();
       _metadata = null;
       _lastOperationStatus = null;
       _feedbackMessage =

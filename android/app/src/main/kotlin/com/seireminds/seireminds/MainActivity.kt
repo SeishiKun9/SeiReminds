@@ -57,11 +57,33 @@ class MainActivity : FlutterActivity() {
                             )
                             putExtra(AlarmPlaybackService.EXTRA_SESSION_LABEL, "Test")
                         }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(intent)
-                        } else {
-                            startService(intent)
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                startForegroundService(intent)
+                            } else {
+                                startService(intent)
+                            }
+                        } catch (_: Exception) {
+                            AlarmPlaybackService.postFallbackAlarmNotification(
+                                context = this,
+                                alarmId = 999,
+                                title = "SeiReminds Test Alarm · Sec A",
+                                body = "Fallback alarm notification triggered.",
+                            )
                         }
+                        result.success(null)
+                    }
+
+                    "showCanvasNotification" -> {
+                        val id = (call.argument<Number>("id") ?: 5000).toInt()
+                        val title = call.argument<String>("title") ?: "Canvas Update"
+                        val body = call.argument<String>("body") ?: ""
+                        AlarmPlaybackService.postTodayCanvasNotification(
+                            context = this,
+                            notificationId = id,
+                            title = title,
+                            body = body,
+                        )
                         result.success(null)
                     }
 
@@ -94,7 +116,7 @@ class MainActivity : FlutterActivity() {
 
                     "openExactAlarmSettings" -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            startActivity(
+                            launchSettingsWithFallback(
                                 Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
                                     data = Uri.parse("package:$packageName")
                                 },
@@ -104,7 +126,9 @@ class MainActivity : FlutterActivity() {
                     }
 
                     "openDndSettings" -> {
-                        startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+                        launchSettingsWithFallback(
+                            Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS),
+                        )
                         result.success(null)
                     }
 
@@ -116,7 +140,9 @@ class MainActivity : FlutterActivity() {
                                 },
                             )
                         } catch (_: Exception) {
-                            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            launchSettingsWithFallback(
+                                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                            )
                         }
                         result.success(null)
                     }
@@ -137,6 +163,21 @@ class MainActivity : FlutterActivity() {
                 grantResults[0] == PackageManager.PERMISSION_GRANTED
             pendingNotifPermissionResult?.success(granted)
             pendingNotifPermissionResult = null
+        }
+    }
+
+    private fun launchSettingsWithFallback(intent: Intent) {
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.parse("package:$packageName")
+                    },
+                )
+            } catch (_: Exception) {
+            }
         }
     }
 

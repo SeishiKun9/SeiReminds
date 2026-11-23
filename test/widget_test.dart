@@ -18,6 +18,13 @@ class _RecordingAlarmService implements AlarmService {
   }
 
   @override
+  Future<void> showCanvasNotification({
+    required int id,
+    required String title,
+    required String body,
+  }) async {}
+
+  @override
   Future<void> triggerTestAlarm() async {
     testAlarmCalls++;
   }
@@ -78,7 +85,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('SeiReminds'), findsOneWidget);
-      expect(find.text('Beta · Offline'), findsOneWidget);
+      expect(find.text('v1.0'), findsOneWidget);
+      expect(find.text('Beta · Offline'), findsNothing);
       for (final day in kSchoolWeekdays) {
         expect(find.byKey(Key('weekday_tab_$day')), findsOneWidget);
       }
@@ -232,14 +240,29 @@ void main() {
         isTrue,
       );
 
-      // 3. Open Settings -> History: verify soft clear preserves & permanent clear keeps schedules.
+      // 3. Open Settings -> History: verify daily cleanup card, soft clear preserves & permanent clear keeps schedules.
       await tester.tap(find.byKey(const Key('settings_button')));
       await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('daily_cleanup_card')), findsOneWidget);
+
+      final settingsScrollable = find
+          .descendant(
+            of: find.byType(ListView),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      final softClearBtn = find.byKey(const Key('soft_clear_history_button'));
+      await tester.scrollUntilVisible(
+        softClearBtn,
+        200,
+        scrollable: settingsScrollable,
+      );
 
       expect(find.text('Visible (2)'), findsOneWidget);
       expect(find.text('Preserved (0)'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('soft_clear_history_button')));
+      await tester.tap(softClearBtn);
       await tester.pumpAndSettle();
 
       expect(find.text('Visible (0)'), findsOneWidget);

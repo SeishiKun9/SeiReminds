@@ -347,6 +347,43 @@ class CanvasTokenRepository {
     }
   }
 
+  /// Fetches announcements and activities posted ONLY on the current local day
+  /// using the active encrypted token. Never logs or returns raw secrets.
+  Future<List<CanvasDailyItem>> fetchTodayUpdates({DateTime? now}) async {
+    final snapshot = await loadState();
+    final existing = snapshot.metadata;
+    if (existing == null) {
+      throw const CanvasApiException(
+        'Connect your Canvas API token first to sync today\'s updates.',
+        isAuthFailure: true,
+      );
+    }
+
+    final current = now ?? _clock();
+    if (existing.resolveConnectionStatus(now: current) ==
+        CanvasConnectionStatus.expired) {
+      throw const CanvasApiException(
+        'Your Canvas API token has expired. Replace your token to sync today\'s updates.',
+        isAuthFailure: true,
+        isExpired: true,
+      );
+    }
+
+    final token = await _store.read(_storageKeyForSlot(existing.slotKey));
+    if (token == null || token.trim().isEmpty) {
+      throw const CanvasApiException(
+        'No Canvas API token is currently saved.',
+        isAuthFailure: true,
+      );
+    }
+
+    return _apiClient.fetchTodayAnnouncementsAndActivities(
+      baseUrl: existing.baseUrl,
+      token: token,
+      now: current,
+    );
+  }
+
   /// Removes the saved Canvas token from local encrypted storage only.
   /// Never revokes the token on Canvas servers.
   Future<void> disconnect() async {
@@ -354,6 +391,10 @@ class CanvasTokenRepository {
     await _safeDelete(_keySlotB);
     await _safeDelete(_keyActiveSlot);
     await _safeDelete(_keyMetadata);
+  }
+
+  void dispose() {
+    _apiClient.dispose();
   }
 
   Future<void> _rollbackCommit({

@@ -46,6 +46,15 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Future<void> _handleDailyCleanup() async {
+    final result = await widget.viewModel.runDailyStorageCleanup();
+    if (!mounted || result == null) return;
+    final msg = result.clearedItemsCount == 0
+        ? 'Daily cleanup checked (${result.dateKey}). Storage is already clean — schedules & history are untouched.'
+        : 'Cleared ${result.clearedItemsCount} stale item(s) from previous days (${result.dateKey}). Schedules & history remain protected.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   Future<void> _handlePermanentClear() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -133,22 +142,40 @@ class _SettingsPageState extends State<SettingsPage> {
                     return Card(
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: theme.colorScheme.primaryContainer,
-                          child: const Icon(Icons.person_outline),
+                          backgroundColor: user != null
+                              ? theme.colorScheme.primaryContainer
+                              : theme.colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            user != null
+                                ? Icons.person_outline
+                                : Icons.cloud_off_outlined,
+                          ),
                         ),
                         title: Text(
-                          user?.label ?? 'Signed Out',
+                          user?.label ?? 'Offline Mode',
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                         subtitle: Text(
-                          user?.email ?? 'Supabase Auth',
+                          user?.email ??
+                              'Schedules, events, history & alarms work offline. Sign in for Canvas.',
                         ),
-                        trailing: TextButton.icon(
-                          key: const Key('sign_out_button'),
-                          onPressed: authVm.isBusy ? null : authVm.signOut,
-                          icon: const Icon(Icons.logout, size: 18),
-                          label: const Text('Sign Out'),
-                        ),
+                        trailing: user != null
+                            ? TextButton.icon(
+                                key: const Key('sign_out_button'),
+                                onPressed:
+                                    authVm.isBusy ? null : authVm.signOut,
+                                icon: const Icon(Icons.logout, size: 18),
+                                label: const Text('Sign Out'),
+                              )
+                            : FilledButton.tonalIcon(
+                                key: const Key('go_to_sign_in_from_settings'),
+                                onPressed: () {
+                                  Navigator.of(context)
+                                      .pushNamed(AppRoutes.login);
+                                },
+                                icon: const Icon(Icons.login, size: 18),
+                                label: const Text('Sign In'),
+                              ),
                       ),
                     );
                   },
@@ -200,12 +227,70 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
               ),
+              const SizedBox(height: 12),
+              Card(
+                key: const Key('daily_cleanup_card'),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.auto_delete_outlined,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Daily Storage Cleanup',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Automatically clears previous days\' Canvas cache daily so storage stays light and yesterday\'s posts are never re-notified. Saved schedules & history stay protected.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        vm.lastDailyCleanupDate != null
+                            ? 'Last daily cleanup: ${vm.lastDailyCleanupDate} (${vm.lastDailyCleanupRemoved} cleared today · ${vm.todayCanvasItems.length} cached for today)'
+                            : 'Scheduled automatically each day',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        key: const Key('run_daily_cleanup_button'),
+                        onPressed: _handleDailyCleanup,
+                        icon: const Icon(Icons.cleaning_services_outlined),
+                        label: const Text('Run Daily Cleanup Now'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               if (widget.canvasViewModel != null) ...<Widget>[
                 const SizedBox(height: 12),
                 ListenableBuilder(
-                  listenable: widget.canvasViewModel!,
+                  listenable: Listenable.merge(<Listenable>[
+                    widget.canvasViewModel!,
+                    if (widget.authViewModel != null) widget.authViewModel!,
+                  ]),
                   builder: (context, _) {
                     final cvm = widget.canvasViewModel!;
+                    final isSignedIn =
+                        widget.authViewModel?.isAuthenticated ?? true;
                     return Card(
                       child: ListTile(
                         key: const Key('open_canvas_settings_tile'),
@@ -218,7 +303,9 @@ class _SettingsPageState extends State<SettingsPage> {
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                         subtitle: Text(
-                          '${cvm.displayedStatus.label} · ${cvm.baseUrl}',
+                          isSignedIn
+                              ? '${cvm.displayedStatus.label} · ${cvm.baseUrl}'
+                              : 'Sign in required · ${cvm.baseUrl}',
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () {
@@ -258,7 +345,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ),
               const SizedBox(height: 18),
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   Text(
                     'History',
@@ -266,7 +354,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const Spacer(),
+                  const SizedBox(height: 8),
                   SegmentedButton<bool>(
                     segments: <ButtonSegment<bool>>[
                       ButtonSegment<bool>(

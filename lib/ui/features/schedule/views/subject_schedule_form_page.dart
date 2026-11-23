@@ -41,6 +41,7 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
   );
 
   final _formKey = GlobalKey<FormState>();
+  final _sectionFieldKey = GlobalKey<FormFieldState<String>>();
   late final TextEditingController _subjectController;
   late final TextEditingController _sectionController;
 
@@ -122,7 +123,7 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
       context: context,
       initialTime: TimeOfDay(hour: current.hour, minute: current.minute),
     );
-    if (picked == null) return;
+    if (!mounted || picked == null) return;
 
     setState(() {
       final updated = ScheduleTime(hour: picked.hour, minute: picked.minute);
@@ -261,18 +262,21 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Expanded(
-                  child: TextFormField(
+                  child: KeyedSubtree(
                     key: const Key('section_field'),
-                    controller: _sectionController,
-                    textCapitalization: TextCapitalization.characters,
-                    autovalidateMode: AutovalidateMode.onUserInteraction,
-                    decoration: const InputDecoration(
-                      labelText: 'Section Letter (A–Z)',
-                      hintText: 'Type A–Z (1 letter)',
-                      prefixIcon: Icon(Icons.badge_outlined),
+                    child: TextFormField(
+                      key: _sectionFieldKey,
+                      controller: _sectionController,
+                      textCapitalization: TextCapitalization.characters,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                      decoration: const InputDecoration(
+                        labelText: 'Section Letter (A–Z)',
+                        hintText: 'Type A–Z (1 letter)',
+                        prefixIcon: Icon(Icons.badge_outlined),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                      validator: validateSectionLetter,
                     ),
-                    onChanged: (_) => setState(() {}),
-                    validator: validateSectionLetter,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -311,6 +315,7 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
                             _sectionController.text = letter;
                             _showAlphabetGrid = false;
                           });
+                          _sectionFieldKey.currentState?.validate();
                         },
                       );
                     }).toList(),

@@ -361,3 +361,113 @@ class CanvasOperationResult {
   final String message;
   final CanvasTokenMetadata? metadata;
 }
+
+/// Formats a local calendar date key (`YYYY-MM-DD`) for strict current-day filtering.
+String localDateKey(DateTime dt) {
+  final local = dt.toLocal();
+  final y = local.year.toString().padLeft(4, '0');
+  final m = local.month.toString().padLeft(2, '0');
+  final d = local.day.toString().padLeft(2, '0');
+  return '$y-$m-$d';
+}
+
+/// Returns true ONLY when [postedAt] falls on the exact same local calendar day as [now].
+/// Items from yesterday or earlier (or another day) always return false.
+bool isPostedOnCurrentDay(DateTime postedAt, {DateTime? now}) {
+  final localPosted = postedAt.toLocal();
+  final localNow = (now ?? DateTime.now()).toLocal();
+  return localPosted.year == localNow.year &&
+      localPosted.month == localNow.month &&
+      localPosted.day == localNow.day;
+}
+
+/// Strips basic HTML tags/entities and clamps message length to keep daily storage compact.
+String stripCanvasHtml(String raw, {int maxLength = 240}) {
+  final collapsed = raw
+      .replaceAll(RegExp(r'<[^>]*>'), ' ')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (collapsed.length <= maxLength) return collapsed;
+  return '${collapsed.substring(0, maxLength - 1).trimRight()}…';
+}
+
+/// Deterministic positive Android notification ID for a today-only Canvas update.
+int stableCanvasNotificationId(String itemId, String postedDate) {
+  var hash = 0x811C9DC5;
+  final key = 'canvas|$postedDate|$itemId';
+  for (final unit in key.codeUnits) {
+    hash ^= unit;
+    hash = (hash * 0x01000193) & 0xFFFFFFFF;
+  }
+  return (hash & 0x1FFFFFFF) + 50000;
+}
+
+enum CanvasDailyItemKind {
+  announcement('announcement', 'Announcement'),
+  activity('activity', 'Activity');
+
+  const CanvasDailyItemKind(this.key, this.label);
+  final String key;
+  final String label;
+
+  static CanvasDailyItemKind fromKey(String key) {
+    return key == 'announcement'
+        ? CanvasDailyItemKind.announcement
+        : CanvasDailyItemKind.activity;
+  }
+}
+
+/// A Canvas announcement or activity posted on the current local day.
+class CanvasDailyItem {
+  const CanvasDailyItem({
+    required this.id,
+    required this.kind,
+    required this.courseName,
+    required this.title,
+    required this.message,
+    required this.postedAt,
+    required this.postedDate,
+    this.notified = false,
+  });
+
+  final String id;
+  final CanvasDailyItemKind kind;
+  final String courseName;
+  final String title;
+  final String message;
+  final DateTime postedAt;
+  final String postedDate;
+  final bool notified;
+}
+
+class DailyCleanupResult {
+  const DailyCleanupResult({
+    required this.dateKey,
+    required this.clearedItemsCount,
+  });
+
+  final String dateKey;
+  final int clearedItemsCount;
+}
+
+class CanvasTodaySyncResult {
+  const CanvasTodaySyncResult({
+    required this.succeeded,
+    required this.message,
+    required this.todayItems,
+    required this.newlyNotifiedCount,
+    required this.clearedStaleCount,
+  });
+
+  final bool succeeded;
+  final String message;
+  final List<CanvasDailyItem> todayItems;
+  final int newlyNotifiedCount;
+  final int clearedStaleCount;
+}
