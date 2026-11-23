@@ -57,7 +57,7 @@ void main() {
   });
 
   testWidgets(
-    'Adds class, announces cancellation on overlapping event, and preserves schedules across History clears',
+    'Adds class, creates Whole Day + optional Evening event canceling sessions, and preserves schedules across History clears',
     (WidgetTester tester) async {
       final alarmService = _RecordingAlarmService();
       final repository = ScheduleRepository(
@@ -70,11 +70,13 @@ void main() {
       addTearDown(repository.close);
 
       await tester.pumpWidget(
-        SeiRemindsApp(repository: repository, initialWeekday: DateTime.monday),
+        SeiRemindsApp(
+          repository: repository,
+          initialWeekday: DateTime.monday,
+        ),
       );
       await tester.pumpAndSettle();
 
-      // Verify Mon-Sat tabs exist and Sunday is omitted.
       expect(find.text('SeiReminds'), findsOneWidget);
       expect(find.text('Beta · Offline'), findsOneWidget);
       for (final day in kSchoolWeekdays) {
@@ -143,9 +145,12 @@ void main() {
       expect(find.text('Sec B'), findsNWidgets(3));
       expect(alarmService.syncedAlarms.length, 4);
 
-      // 2. Add Monday Morning Event (8:00 AM - 12:00 PM) that hits Online & Lecture.
+      // 2. Add Whole Day Event with Morning In/Out + Afternoon In/Out + Optional Evening Time In.
       await tester.tap(find.byKey(const Key('add_event_button')));
       await tester.pumpAndSettle();
+
+      expect(find.text('Morning & Afternoon'), findsNothing);
+      expect(find.text('Whole Day'), findsOneWidget);
 
       await tester.enterText(
         find.byKey(const Key('event_title_field')),
@@ -153,30 +158,81 @@ void main() {
       );
       await tester.pump();
 
-      // Live preview detects the 2 overlapping Monday morning sessions.
-      expect(
-        find.textContaining('Will announce classes canceled (2 hit)'),
-        findsOneWidget,
+      await tester.tap(find.byKey(const Key('event_period_whole_day')));
+      await tester.pumpAndSettle();
+
+      // Verify both Morning and Afternoon Time In/Out exist.
+      final eventScrollable = find
+          .descendant(
+            of: find.byType(ListView),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      expect(find.byKey(const Key('event_morning_in')), findsOneWidget);
+      expect(find.byKey(const Key('event_morning_out')), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('event_afternoon_in')),
+        200,
+        scrollable: eventScrollable,
       );
+      expect(find.byKey(const Key('event_afternoon_in')), findsOneWidget);
+      expect(find.byKey(const Key('event_afternoon_out')), findsOneWidget);
+
+      // Toggle Optional Evening Time In (only Time In, no Time Out).
+      final eveningToggle = find.byKey(const Key('event_evening_toggle'));
+      await tester.scrollUntilVisible(
+        eveningToggle,
+        300,
+        scrollable: eventScrollable,
+      );
+      await tester.drag(eventScrollable, const Offset(0, -160));
+      await tester.pumpAndSettle();
+      await tester.tap(eveningToggle);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('event_evening_in')), findsOneWidget);
+      expect(find.textContaining('Evening Time Out'), findsNothing);
+
+      // Whole Day hits all 3 Monday sessions (Online 8-9:30, Lecture 10-11:30, Lab 1-3).
+      final impactText = find.textContaining(
+        'Will announce classes canceled (3 hit)',
+      );
+      await tester.scrollUntilVisible(
+        impactText,
+        250,
+        scrollable: eventScrollable,
+      );
+      expect(impactText, findsOneWidget);
 
       await tester.tap(find.byKey(const Key('save_event_button')));
       await tester.pumpAndSettle();
 
-      // Timetable announces canceled classes and marks overlapping sessions canceled.
       expect(find.text('CLASSES CANCELED · Foundation Day'), findsOneWidget);
-      expect(find.text('CANCELED · Foundation Day'), findsNWidgets(2));
+      expect(find.textContaining('Evening In 6:00 PM'), findsOneWidget);
+      expect(find.text('CANCELED · Foundation Day'), findsNWidgets(3));
 
-      // Synced alarms now include the Event cancellation alarm and suppress the 2 canceled morning sessions
-      // (keeping Mon Lab + Wed Lecture + Mon Event = 3 total).
-      expect(alarmService.syncedAlarms.length, 3);
+      // Synced alarms: Wed Lecture (1) + Mon Whole Day Morning, Afternoon, Evening (3) = 4 total.
+      expect(alarmService.syncedAlarms.length, 4);
       expect(
         alarmService.syncedAlarms.any(
-          (a) => a.title == 'Classes Canceled · Foundation Day',
+          (a) => a.title == 'Classes Canceled · Foundation Day (Morning)',
+        ),
+        isTrue,
+      );
+      expect(
+        alarmService.syncedAlarms.any(
+          (a) => a.title == 'Classes Canceled · Foundation Day (Afternoon)',
+        ),
+        isTrue,
+      );
+      expect(
+        alarmService.syncedAlarms.any(
+          (a) => a.title == 'Event · Foundation Day (Evening)',
         ),
         isTrue,
       );
 
-      // 3. Open Settings -> History: verify soft clear preserves records and permanent clear keeps schedules.
+      // 3. Open Settings -> History: verify soft clear preserves & permanent clear keeps schedules.
       await tester.tap(find.byKey(const Key('settings_button')));
       await tester.pumpAndSettle();
 
@@ -189,7 +245,6 @@ void main() {
       expect(find.text('Visible (0)'), findsOneWidget);
       expect(find.text('Preserved (2)'), findsOneWidget);
 
-      // Permanently clear history after explicit confirmation.
       await tester.tap(find.byKey(const Key('permanent_clear_history_button')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('confirm_permanent_clear_button')));
@@ -198,7 +253,7 @@ void main() {
       expect(find.text('Visible (0)'), findsOneWidget);
       expect(find.text('Preserved (0)'), findsOneWidget);
 
-      // Return to timetable and verify schedules were NEVER deleted.
+      // Return to timetable and verify schedules remain untouched.
       await tester.pageBack();
       await tester.pumpAndSettle();
       expect(find.text('Data Structures'), findsNWidgets(3));

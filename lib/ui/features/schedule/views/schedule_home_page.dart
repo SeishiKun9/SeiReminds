@@ -387,7 +387,7 @@ class _EventAnnouncementCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${event.period.label} · ${event.formatTimeRange()}',
+                      '${event.period.label} · ${event.formatTimeSummary()}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: fg,
                         fontWeight: FontWeight.w600,

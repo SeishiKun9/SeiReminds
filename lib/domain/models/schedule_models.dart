@@ -2,6 +2,7 @@ const List<int> kSchoolWeekdays = <int>[1, 2, 3, 4, 5, 6];
 const List<int> kEventWeekdays = <int>[1, 2, 3, 4, 5];
 const List<int> kReminderLeadOptions = <int>[0, 5, 10, 15, 30];
 const int kNoonMinutes = 12 * 60;
+const int kEveningMinMinutes = 17 * 60;
 
 final RegExp _singleLetterPattern = RegExp(r'^[A-Za-z]$');
 
@@ -89,9 +90,13 @@ enum SessionType {
 }
 
 enum EventPeriod {
-  morning('morning', 'Morning', 'Before 12:00 PM'),
-  afternoon('afternoon', 'Afternoon', '12:00 PM onward'),
-  both('both', 'Morning & Afternoon', 'Spans morning to afternoon');
+  morning('morning', 'Morning', 'Morning Time In & Time Out (ends by 12:00 PM)'),
+  afternoon('afternoon', 'Afternoon', 'Afternoon Time In & Time Out (12:00 PM onward)'),
+  wholeDay(
+    'whole_day',
+    'Whole Day',
+    'Separate Morning & Afternoon Time In/Out (+ optional Evening Time In)',
+  );
 
   const EventPeriod(this.key, this.label, this.hint);
 
@@ -99,23 +104,22 @@ enum EventPeriod {
   final String label;
   final String hint;
 
-  ScheduleTime get defaultTimeIn => switch (this) {
-        EventPeriod.morning => const ScheduleTime(hour: 8, minute: 0),
-        EventPeriod.afternoon => const ScheduleTime(hour: 13, minute: 0),
-        EventPeriod.both => const ScheduleTime(hour: 8, minute: 0),
-      };
+  bool get hasMorning => this == EventPeriod.morning || this == EventPeriod.wholeDay;
 
-  ScheduleTime get defaultTimeOut => switch (this) {
-        EventPeriod.morning => const ScheduleTime(hour: 12, minute: 0),
-        EventPeriod.afternoon => const ScheduleTime(hour: 17, minute: 0),
-        EventPeriod.both => const ScheduleTime(hour: 17, minute: 0),
-      };
+  bool get hasAfternoon =>
+      this == EventPeriod.afternoon || this == EventPeriod.wholeDay;
+
+  static const ScheduleTime defaultMorningIn = ScheduleTime(hour: 8, minute: 0);
+  static const ScheduleTime defaultMorningOut = ScheduleTime(hour: 12, minute: 0);
+  static const ScheduleTime defaultAfternoonIn = ScheduleTime(hour: 13, minute: 0);
+  static const ScheduleTime defaultAfternoonOut = ScheduleTime(hour: 17, minute: 0);
+  static const ScheduleTime defaultEveningIn = ScheduleTime(hour: 18, minute: 0);
 
   static EventPeriod fromKey(String key) {
     return switch (key) {
       'morning' => EventPeriod.morning,
       'afternoon' => EventPeriod.afternoon,
-      'both' => EventPeriod.both,
+      'whole_day' || 'both' => EventPeriod.wholeDay,
       _ => throw FormatException('Unknown event period: $key'),
     };
   }
@@ -369,14 +373,50 @@ class SubjectSchedule {
       };
 }
 
+class EventTimeSlot {
+  const EventTimeSlot({
+    required this.key,
+    required this.label,
+    required this.timeIn,
+    this.timeOut,
+  });
+
+  final String key;
+  final String label;
+  final ScheduleTime timeIn;
+
+  /// Null for optional Evening events (Time In only; active through end of day).
+  final ScheduleTime? timeOut;
+
+  bool overlapsSession(SessionSchedule session) {
+    final end = timeOut;
+    if (end != null) {
+      return timesOverlap(timeIn, end, session.timeIn, session.timeOut);
+    }
+    // Evening Time In is open-ended from timeIn through 11:59 PM.
+    return session.timeOut.totalMinutes > timeIn.totalMinutes;
+  }
+
+  String formatRange() {
+    final end = timeOut;
+    if (end == null) {
+      return '$label In ${timeIn.format12Hour()}';
+    }
+    return '$label ${timeIn.format12Hour()} – ${end.format12Hour()}';
+  }
+}
+
 class EventSchedule {
   EventSchedule({
     required this.id,
     required String title,
     required Iterable<int> days,
     required this.period,
-    required this.timeIn,
-    required this.timeOut,
+    this.morningTimeIn,
+    this.morningTimeOut,
+    this.afternoonTimeIn,
+    this.afternoonTimeOut,
+    this.eveningTimeIn,
     this.reminderMinutesBefore = 10,
     this.reminderEnabled = true,
     DateTime? updatedAt,
@@ -393,8 +433,13 @@ class EventSchedule {
   final String title;
   final List<int> days;
   final EventPeriod period;
-  final ScheduleTime timeIn;
-  final ScheduleTime timeOut;
+  final ScheduleTime? morningTimeIn;
+  final ScheduleTime? morningTimeOut;
+  final ScheduleTime? afternoonTimeIn;
+  final ScheduleTime? afternoonTimeOut;
+
+  /// Optional evening Time In only (no Time Out).
+  final ScheduleTime? eveningTimeIn;
   final int reminderMinutesBefore;
   final bool reminderEnabled;
   final DateTime updatedAt;
@@ -403,8 +448,11 @@ class EventSchedule {
     required String title,
     required Iterable<int> days,
     required EventPeriod period,
-    required ScheduleTime timeIn,
-    required ScheduleTime timeOut,
+    ScheduleTime? morningTimeIn,
+    ScheduleTime? morningTimeOut,
+    ScheduleTime? afternoonTimeIn,
+    ScheduleTime? afternoonTimeOut,
+    ScheduleTime? eveningTimeIn,
     int reminderMinutesBefore = 10,
   }) {
     if (title.trim().isEmpty) {
@@ -417,29 +465,49 @@ class EventSchedule {
     if (dayList.any((d) => d < DateTime.monday || d > DateTime.friday)) {
       return 'Event schedules must be Monday to Friday only';
     }
-    if (timeOut.totalMinutes <= timeIn.totalMinutes) {
-      return 'Event Time Out must be after Time In';
-    }
     if (reminderMinutesBefore < 0 || reminderMinutesBefore > 120) {
       return 'Reminder lead time must be 0–120 minutes';
     }
 
-    switch (period) {
-      case EventPeriod.morning:
-        if (timeIn.totalMinutes >= kNoonMinutes ||
-            timeOut.totalMinutes > kNoonMinutes) {
-          return 'Morning events must end by 12:00 PM';
-        }
-      case EventPeriod.afternoon:
-        if (timeIn.totalMinutes < kNoonMinutes) {
-          return 'Afternoon events must start at 12:00 PM or later';
-        }
-      case EventPeriod.both:
-        if (timeIn.totalMinutes >= kNoonMinutes ||
-            timeOut.totalMinutes <= kNoonMinutes) {
-          return 'Morning & Afternoon events must start before 12:00 PM and end after 12:00 PM';
-        }
+    if (period.hasMorning) {
+      if (morningTimeIn == null || morningTimeOut == null) {
+        return 'Set Morning Time In and Time Out';
+      }
+      if (morningTimeOut.totalMinutes <= morningTimeIn.totalMinutes) {
+        return 'Morning Time Out must be after Morning Time In';
+      }
+      if (morningTimeIn.totalMinutes >= kNoonMinutes ||
+          morningTimeOut.totalMinutes > kNoonMinutes) {
+        return 'Morning event time must end by 12:00 PM';
+      }
+    } else if (morningTimeIn != null || morningTimeOut != null) {
+      return 'Morning times only apply to Morning or Whole Day events';
     }
+
+    if (period.hasAfternoon) {
+      if (afternoonTimeIn == null || afternoonTimeOut == null) {
+        return 'Set Afternoon Time In and Time Out';
+      }
+      if (afternoonTimeOut.totalMinutes <= afternoonTimeIn.totalMinutes) {
+        return 'Afternoon Time Out must be after Afternoon Time In';
+      }
+      if (afternoonTimeIn.totalMinutes < kNoonMinutes) {
+        return 'Afternoon event time must start at 12:00 PM or later';
+      }
+    } else if (afternoonTimeIn != null || afternoonTimeOut != null) {
+      return 'Afternoon times only apply to Afternoon or Whole Day events';
+    }
+
+    if (eveningTimeIn != null) {
+      if (eveningTimeIn.totalMinutes < kEveningMinMinutes) {
+        return 'Evening Time In must be 5:00 PM or later';
+      }
+      if (afternoonTimeOut != null &&
+          eveningTimeIn.totalMinutes < afternoonTimeOut.totalMinutes) {
+        return 'Evening Time In cannot be before Afternoon Time Out';
+      }
+    }
+
     return null;
   }
 
@@ -447,13 +515,45 @@ class EventSchedule {
         title: title,
         days: days,
         period: period,
-        timeIn: timeIn,
-        timeOut: timeOut,
+        morningTimeIn: morningTimeIn,
+        morningTimeOut: morningTimeOut,
+        afternoonTimeIn: afternoonTimeIn,
+        afternoonTimeOut: afternoonTimeOut,
+        eveningTimeIn: eveningTimeIn,
         reminderMinutesBefore: reminderMinutesBefore,
       );
 
-  String formatTimeRange() =>
-      '${timeIn.format12Hour()} – ${timeOut.format12Hour()}';
+  List<EventTimeSlot> get timeSlots => <EventTimeSlot>[
+        if (morningTimeIn != null && morningTimeOut != null)
+          EventTimeSlot(
+            key: 'morning',
+            label: 'Morning',
+            timeIn: morningTimeIn!,
+            timeOut: morningTimeOut,
+          ),
+        if (afternoonTimeIn != null && afternoonTimeOut != null)
+          EventTimeSlot(
+            key: 'afternoon',
+            label: 'Afternoon',
+            timeIn: afternoonTimeIn!,
+            timeOut: afternoonTimeOut,
+          ),
+        if (eveningTimeIn != null)
+          EventTimeSlot(
+            key: 'evening',
+            label: 'Evening',
+            timeIn: eveningTimeIn!,
+          ),
+      ];
+
+  ScheduleTime get firstStartTime => timeSlots.first.timeIn;
+
+  bool overlapsSession(SessionSchedule session) {
+    return timeSlots.any((slot) => slot.overlapsSession(session));
+  }
+
+  String formatTimeSummary() =>
+      timeSlots.map((slot) => slot.formatRange()).join(' · ');
 
   String formatDaysSummary() => days.map(weekdayShortLabel).join(', ');
 
@@ -462,19 +562,33 @@ class EventSchedule {
     String? title,
     Iterable<int>? days,
     EventPeriod? period,
-    ScheduleTime? timeIn,
-    ScheduleTime? timeOut,
+    ScheduleTime? morningTimeIn,
+    ScheduleTime? morningTimeOut,
+    ScheduleTime? afternoonTimeIn,
+    ScheduleTime? afternoonTimeOut,
+    ScheduleTime? eveningTimeIn,
+    bool clearEvening = false,
     int? reminderMinutesBefore,
     bool? reminderEnabled,
     DateTime? updatedAt,
   }) {
+    final nextPeriod = period ?? this.period;
     return EventSchedule(
       id: id ?? this.id,
       title: title ?? this.title,
       days: days ?? this.days,
-      period: period ?? this.period,
-      timeIn: timeIn ?? this.timeIn,
-      timeOut: timeOut ?? this.timeOut,
+      period: nextPeriod,
+      morningTimeIn:
+          nextPeriod.hasMorning ? (morningTimeIn ?? this.morningTimeIn) : null,
+      morningTimeOut:
+          nextPeriod.hasMorning ? (morningTimeOut ?? this.morningTimeOut) : null,
+      afternoonTimeIn: nextPeriod.hasAfternoon
+          ? (afternoonTimeIn ?? this.afternoonTimeIn)
+          : null,
+      afternoonTimeOut: nextPeriod.hasAfternoon
+          ? (afternoonTimeOut ?? this.afternoonTimeOut)
+          : null,
+      eveningTimeIn: clearEvening ? null : (eveningTimeIn ?? this.eveningTimeIn),
       reminderMinutesBefore:
           reminderMinutesBefore ?? this.reminderMinutesBefore,
       reminderEnabled: reminderEnabled ?? this.reminderEnabled,
@@ -487,8 +601,11 @@ class EventSchedule {
         'title': title,
         'days': days,
         'period': period.key,
-        'timeIn': timeIn.toJson(),
-        'timeOut': timeOut.toJson(),
+        'morningTimeIn': morningTimeIn?.toJson(),
+        'morningTimeOut': morningTimeOut?.toJson(),
+        'afternoonTimeIn': afternoonTimeIn?.toJson(),
+        'afternoonTimeOut': afternoonTimeOut?.toJson(),
+        'eveningTimeIn': eveningTimeIn?.toJson(),
         'reminderMinutesBefore': reminderMinutesBefore,
         'reminderEnabled': reminderEnabled,
         'updatedAt': updatedAt.toIso8601String(),
@@ -575,10 +692,8 @@ List<EventSchedule> eventsForWeekday(
 ) {
   final items = events.where((e) => e.days.contains(weekday)).toList()
     ..sort((a, b) {
-      final byStart = a.timeIn.compareTo(b.timeIn);
+      final byStart = a.firstStartTime.compareTo(b.firstStartTime);
       if (byStart != 0) return byStart;
-      final byEnd = a.timeOut.compareTo(b.timeOut);
-      if (byEnd != 0) return byEnd;
       return a.title.toLowerCase().compareTo(b.title.toLowerCase());
     });
   return items;
@@ -590,14 +705,7 @@ List<EventSchedule> conflictingEventsForSession(
   SessionSchedule session,
 ) {
   return eventsForWeekday(events, weekday)
-      .where(
-        (event) => timesOverlap(
-          event.timeIn,
-          event.timeOut,
-          session.timeIn,
-          session.timeOut,
-        ),
-      )
+      .where((event) => event.overlapsSession(session))
       .toList();
 }
 
@@ -608,14 +716,7 @@ List<DaySessionItem> affectedSessionsForEventOnDay(
 ) {
   if (!event.days.contains(weekday)) return const <DaySessionItem>[];
   return sessionsForWeekday(schedules, weekday)
-      .where(
-        (item) => timesOverlap(
-          event.timeIn,
-          event.timeOut,
-          item.session.timeIn,
-          item.session.timeOut,
-        ),
-      )
+      .where((item) => event.overlapsSession(item.session))
       .toList();
 }
 
@@ -635,7 +736,7 @@ String buildCancellationAnnouncement(
   List<DaySessionItem> affectedSessions,
 ) {
   if (affectedSessions.isEmpty) {
-    return '${event.title} (${event.period.label}, ${event.formatTimeRange()}) has no overlapping classes.';
+    return '${event.title} (${event.period.label}: ${event.formatTimeSummary()}) has no overlapping classes.';
   }
   final names = affectedSessions.map((item) => item.shortSummary).join(', ');
   return 'Classes canceled due to ${event.title}: $names.';
@@ -711,8 +812,8 @@ int stableAlarmId(String scheduleId, SessionType type, int weekday) {
   return _fnv1aAlarmId('$scheduleId|${type.key}|$weekday');
 }
 
-int stableEventAlarmId(String eventId, int weekday) {
-  return _fnv1aAlarmId('event|$eventId|$weekday');
+int stableEventAlarmId(String eventId, int weekday, String slotKey) {
+  return _fnv1aAlarmId('event|$eventId|$weekday|$slotKey');
 }
 
 List<ScheduledAlarmPayload> buildAlarmPayloads(
@@ -767,36 +868,41 @@ List<ScheduledAlarmPayload> buildAlarmPayloads(
     if (!event.reminderEnabled) continue;
 
     for (final day in event.days) {
-      final trigger = computeAlarmTrigger(
-        weekday: day,
-        timeIn: event.timeIn,
-        minutesBefore: event.reminderMinutesBefore,
-      );
-      var id = stableEventAlarmId(event.id, day);
-      while (!usedIds.add(id)) {
-        id++;
+      final daySessions = sessionsForWeekday(schedules, day);
+      for (final slot in event.timeSlots) {
+        final trigger = computeAlarmTrigger(
+          weekday: day,
+          timeIn: slot.timeIn,
+          minutesBefore: event.reminderMinutesBefore,
+        );
+        var id = stableEventAlarmId(event.id, day, slot.key);
+        while (!usedIds.add(id)) {
+          id++;
+        }
+
+        final affected = daySessions
+            .where((item) => slot.overlapsSession(item.session))
+            .toList();
+        final title = affected.isNotEmpty
+            ? 'Classes Canceled · ${event.title} (${slot.label})'
+            : 'Event · ${event.title} (${slot.label})';
+        final body = affected.isNotEmpty
+            ? 'Classes canceled due to ${event.title}: ${affected.map((s) => s.shortSummary).join(', ')} (${slot.formatRange()})'
+            : '${event.period.label} event (${slot.formatRange()})';
+
+        payloads.add(
+          ScheduledAlarmPayload(
+            id: id,
+            scheduleId: event.id,
+            weekday: trigger.weekday,
+            hour: trigger.hour,
+            minute: trigger.minute,
+            title: title,
+            body: body,
+            sessionLabel: 'Event',
+          ),
+        );
       }
-
-      final affected = affectedSessionsForEventOnDay(event, schedules, day);
-      final title = affected.isNotEmpty
-          ? 'Classes Canceled · ${event.title}'
-          : 'Event · ${event.title}';
-      final body = affected.isNotEmpty
-          ? '${buildCancellationAnnouncement(event, affected)} (${event.period.label}, ${event.formatTimeRange()})'
-          : '${event.period.label} event (${event.formatTimeRange()})';
-
-      payloads.add(
-        ScheduledAlarmPayload(
-          id: id,
-          scheduleId: event.id,
-          weekday: trigger.weekday,
-          hour: trigger.hour,
-          minute: trigger.minute,
-          title: title,
-          body: body,
-          sessionLabel: 'Event',
-        ),
-      );
     }
   }
 

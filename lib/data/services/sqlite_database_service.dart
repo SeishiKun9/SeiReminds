@@ -12,7 +12,7 @@ class SqliteScheduleDatabase {
   });
 
   static const String dbFileName = 'seireminds.db';
-  static const int _dbVersion = 1;
+  static const int _dbVersion = 2;
 
   final DatabaseFactory? _databaseFactory;
   final String? _databasePath;
@@ -33,6 +33,7 @@ class SqliteScheduleDatabase {
           await db.execute('PRAGMA foreign_keys = ON');
         },
         onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
       ),
     );
     return _db!;
@@ -63,19 +64,7 @@ class SqliteScheduleDatabase {
       )
     ''');
 
-    await db.execute('''
-      CREATE TABLE events (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        days_csv TEXT NOT NULL,
-        period TEXT NOT NULL,
-        time_in_minutes INTEGER NOT NULL,
-        time_out_minutes INTEGER NOT NULL,
-        reminder_minutes_before INTEGER NOT NULL,
-        reminder_enabled INTEGER NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    ''');
+    await _createEventsTableV2(db, tableName: 'events');
 
     await db.execute('''
       CREATE TABLE history_entries (
@@ -90,6 +79,84 @@ class SqliteScheduleDatabase {
         created_at TEXT NOT NULL
       )
     ''');
+  }
+
+  Future<void> _createEventsTableV2(
+    DatabaseExecutor db, {
+    required String tableName,
+  }) async {
+    await db.execute('''
+      CREATE TABLE $tableName (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        days_csv TEXT NOT NULL,
+        period TEXT NOT NULL,
+        morning_time_in INTEGER,
+        morning_time_out INTEGER,
+        afternoon_time_in INTEGER,
+        afternoon_time_out INTEGER,
+        evening_time_in INTEGER,
+        reminder_minutes_before INTEGER NOT NULL,
+        reminder_enabled INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.transaction((txn) async {
+        await _createEventsTableV2(txn, tableName: 'events_v2');
+        final oldRows = await txn.query('events');
+
+        for (final row in oldRows) {
+          final rawPeriod = row['period'] as String;
+          final timeIn = row['time_in_minutes'] as int;
+          final timeOut = row['time_out_minutes'] as int;
+
+          String nextPeriod;
+          int? morningIn;
+          int? morningOut;
+          int? afternoonIn;
+          int? afternoonOut;
+
+          if (rawPeriod == 'morning') {
+            nextPeriod = EventPeriod.morning.key;
+            morningIn = timeIn;
+            morningOut = timeOut;
+          } else if (rawPeriod == 'afternoon') {
+            nextPeriod = EventPeriod.afternoon.key;
+            afternoonIn = timeIn;
+            afternoonOut = timeOut;
+          } else {
+            // Losslessly split legacy 'both' events at noon into Whole Day slots.
+            nextPeriod = EventPeriod.wholeDay.key;
+            morningIn = timeIn;
+            morningOut = kNoonMinutes;
+            afternoonIn = kNoonMinutes;
+            afternoonOut = timeOut;
+          }
+
+          await txn.insert('events_v2', <String, Object?>{
+            'id': row['id'],
+            'title': row['title'],
+            'days_csv': row['days_csv'],
+            'period': nextPeriod,
+            'morning_time_in': morningIn,
+            'morning_time_out': morningOut,
+            'afternoon_time_in': afternoonIn,
+            'afternoon_time_out': afternoonOut,
+            'evening_time_in': null,
+            'reminder_minutes_before': row['reminder_minutes_before'],
+            'reminder_enabled': row['reminder_enabled'],
+            'updated_at': row['updated_at'],
+          });
+        }
+
+        await txn.execute('DROP TABLE events');
+        await txn.execute('ALTER TABLE events_v2 RENAME TO events');
+      });
+    }
   }
 
   Future<void> close() async {
@@ -133,7 +200,8 @@ class SqliteScheduleDatabase {
         id: id,
         subject: row['subject'] as String,
         section: row['section'] as String,
-        sessions: sessionsByScheduleId[id] ?? const <SessionType, SessionSchedule>{},
+        sessions:
+            sessionsByScheduleId[id] ?? const <SessionType, SessionSchedule>{},
         reminderMinutesBefore: row['reminder_minutes_before'] as int,
         reminderEnabled: (row['reminder_enabled'] as int) == 1,
         updatedAt: DateTime.parse(row['updated_at'] as String),
@@ -177,7 +245,10 @@ class SqliteScheduleDatabase {
       }
 
       final sessionSummary = schedule.sessions.values
-          .map((s) => '${s.type.label} (${s.formatDaysSummary()} · ${s.formatTimeRange()})')
+          .map(
+            (s) =>
+                '${s.type.label} (${s.formatDaysSummary()} · ${s.formatTimeRange()})',
+          )
           .join('; ');
 
       await _insertHistory(
@@ -263,15 +334,35 @@ class SqliteScheduleDatabase {
   }
 
   Future<List<EventSchedule>> _readEvents(DatabaseExecutor db) async {
-    final rows = await db.query('events', orderBy: 'time_in_minutes ASC, title ASC');
+    final rows = await db.query(
+      'events',
+      orderBy: 'COALESCE(morning_time_in, afternoon_time_in, evening_time_in) ASC, title ASC',
+    );
     return rows.map((row) {
+      final morningIn = row['morning_time_in'] as int?;
+      final morningOut = row['morning_time_out'] as int?;
+      final afternoonIn = row['afternoon_time_in'] as int?;
+      final afternoonOut = row['afternoon_time_out'] as int?;
+      final eveningIn = row['evening_time_in'] as int?;
+
       return EventSchedule(
         id: row['id'] as String,
         title: row['title'] as String,
         days: _decodeDays(row['days_csv'] as String),
         period: EventPeriod.fromKey(row['period'] as String),
-        timeIn: ScheduleTime.fromTotalMinutes(row['time_in_minutes'] as int),
-        timeOut: ScheduleTime.fromTotalMinutes(row['time_out_minutes'] as int),
+        morningTimeIn:
+            morningIn != null ? ScheduleTime.fromTotalMinutes(morningIn) : null,
+        morningTimeOut: morningOut != null
+            ? ScheduleTime.fromTotalMinutes(morningOut)
+            : null,
+        afternoonTimeIn: afternoonIn != null
+            ? ScheduleTime.fromTotalMinutes(afternoonIn)
+            : null,
+        afternoonTimeOut: afternoonOut != null
+            ? ScheduleTime.fromTotalMinutes(afternoonOut)
+            : null,
+        eveningTimeIn:
+            eveningIn != null ? ScheduleTime.fromTotalMinutes(eveningIn) : null,
         reminderMinutesBefore: row['reminder_minutes_before'] as int,
         reminderEnabled: (row['reminder_enabled'] as int) == 1,
         updatedAt: DateTime.parse(row['updated_at'] as String),
@@ -293,8 +384,11 @@ class SqliteScheduleDatabase {
           'title': event.title,
           'days_csv': _encodeDays(event.days),
           'period': event.period.key,
-          'time_in_minutes': event.timeIn.totalMinutes,
-          'time_out_minutes': event.timeOut.totalMinutes,
+          'morning_time_in': event.morningTimeIn?.totalMinutes,
+          'morning_time_out': event.morningTimeOut?.totalMinutes,
+          'afternoon_time_in': event.afternoonTimeIn?.totalMinutes,
+          'afternoon_time_out': event.afternoonTimeOut?.totalMinutes,
+          'evening_time_in': event.eveningTimeIn?.totalMinutes,
           'reminder_minutes_before': event.reminderMinutesBefore,
           'reminder_enabled': event.reminderEnabled ? 1 : 0,
           'updated_at': event.updatedAt.toIso8601String(),
@@ -313,7 +407,7 @@ class SqliteScheduleDatabase {
         entityId: event.id,
         title: 'Event: ${event.title}',
         details:
-            '${event.formatDaysSummary()} · ${event.period.label} (${event.formatTimeRange()}) · $cancelNote',
+            '${event.formatDaysSummary()} · ${event.period.label} (${event.formatTimeSummary()}) · $cancelNote',
         snapshotJson: jsonEncode(event.toJson()),
       );
     });

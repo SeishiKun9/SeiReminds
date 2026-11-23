@@ -23,8 +23,12 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
   late final TextEditingController _titleController;
   late Set<int> _selectedDays;
   late EventPeriod _period;
-  late ScheduleTime _timeIn;
-  late ScheduleTime _timeOut;
+  late ScheduleTime _morningTimeIn;
+  late ScheduleTime _morningTimeOut;
+  late ScheduleTime _afternoonTimeIn;
+  late ScheduleTime _afternoonTimeOut;
+  late bool _hasEvening;
+  late ScheduleTime _eveningTimeIn;
   late int _reminderMinutesBefore;
   late bool _reminderEnabled;
   String? _validationError;
@@ -42,8 +46,14 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
         : DateTime.monday;
     _selectedDays = existing?.days.toSet() ?? <int>{defaultDay};
     _period = existing?.period ?? EventPeriod.morning;
-    _timeIn = existing?.timeIn ?? _period.defaultTimeIn;
-    _timeOut = existing?.timeOut ?? _period.defaultTimeOut;
+    _morningTimeIn = existing?.morningTimeIn ?? EventPeriod.defaultMorningIn;
+    _morningTimeOut = existing?.morningTimeOut ?? EventPeriod.defaultMorningOut;
+    _afternoonTimeIn =
+        existing?.afternoonTimeIn ?? EventPeriod.defaultAfternoonIn;
+    _afternoonTimeOut =
+        existing?.afternoonTimeOut ?? EventPeriod.defaultAfternoonOut;
+    _hasEvening = existing?.eveningTimeIn != null;
+    _eveningTimeIn = existing?.eveningTimeIn ?? EventPeriod.defaultEveningIn;
     _reminderMinutesBefore = existing?.reminderMinutesBefore ?? 10;
     _reminderEnabled = existing?.reminderEnabled ?? true;
   }
@@ -54,42 +64,64 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
     super.dispose();
   }
 
-  void _selectPeriod(EventPeriod period) {
-    setState(() {
-      _period = period;
-      _timeIn = period.defaultTimeIn;
-      _timeOut = period.defaultTimeOut;
-      _validationError = null;
-    });
-  }
+  ScheduleTime? get _activeMorningIn =>
+      _period.hasMorning ? _morningTimeIn : null;
+  ScheduleTime? get _activeMorningOut =>
+      _period.hasMorning ? _morningTimeOut : null;
+  ScheduleTime? get _activeAfternoonIn =>
+      _period.hasAfternoon ? _afternoonTimeIn : null;
+  ScheduleTime? get _activeAfternoonOut =>
+      _period.hasAfternoon ? _afternoonTimeOut : null;
+  ScheduleTime? get _activeEveningIn => _hasEvening ? _eveningTimeIn : null;
 
-  Future<void> _pickTime({required bool isTimeIn}) async {
-    final current = isTimeIn ? _timeIn : _timeOut;
+  Future<void> _pickTime({
+    required ScheduleTime initial,
+    required ValueChanged<ScheduleTime> onPicked,
+  }) async {
     final picked = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay(hour: current.hour, minute: current.minute),
+      initialTime: TimeOfDay(hour: initial.hour, minute: initial.minute),
     );
     if (picked == null) return;
     setState(() {
-      final updated = ScheduleTime(hour: picked.hour, minute: picked.minute);
-      if (isTimeIn) {
-        _timeIn = updated;
-      } else {
-        _timeOut = updated;
-      }
+      onPicked(ScheduleTime(hour: picked.hour, minute: picked.minute));
       _validationError = null;
     });
   }
 
   List<DaySessionItem> _previewAffectedSessions() {
-    if (_selectedDays.isEmpty || _timeOut.totalMinutes <= _timeIn.totalMinutes) {
-      return const <DaySessionItem>[];
-    }
+    if (_selectedDays.isEmpty) return const <DaySessionItem>[];
+    final slots = <EventTimeSlot>[
+      if (_period.hasMorning &&
+          _morningTimeOut.totalMinutes > _morningTimeIn.totalMinutes)
+        EventTimeSlot(
+          key: 'morning',
+          label: 'Morning',
+          timeIn: _morningTimeIn,
+          timeOut: _morningTimeOut,
+        ),
+      if (_period.hasAfternoon &&
+          _afternoonTimeOut.totalMinutes > _afternoonTimeIn.totalMinutes)
+        EventTimeSlot(
+          key: 'afternoon',
+          label: 'Afternoon',
+          timeIn: _afternoonTimeIn,
+          timeOut: _afternoonTimeOut,
+        ),
+      if (_hasEvening)
+        EventTimeSlot(
+          key: 'evening',
+          label: 'Evening',
+          timeIn: _eveningTimeIn,
+        ),
+    ];
+    if (slots.isEmpty) return const <DaySessionItem>[];
+
     final affected = <DaySessionItem>[];
     final sortedDays = _selectedDays.toList()..sort();
     for (final day in sortedDays) {
       for (final item in sessionsForWeekday(widget.existingSchedules, day)) {
-        if (timesOverlap(_timeIn, _timeOut, item.session.timeIn, item.session.timeOut)) {
+        if (slots.any((slot) => slot.overlapsSession(item.session))) {
           affected.add(item);
         }
       }
@@ -103,8 +135,11 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
       title: _titleController.text,
       days: _selectedDays,
       period: _period,
-      timeIn: _timeIn,
-      timeOut: _timeOut,
+      morningTimeIn: _activeMorningIn,
+      morningTimeOut: _activeMorningOut,
+      afternoonTimeIn: _activeAfternoonIn,
+      afternoonTimeOut: _activeAfternoonOut,
+      eveningTimeIn: _activeEveningIn,
       reminderMinutesBefore: _reminderMinutesBefore,
     );
 
@@ -120,8 +155,11 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
       title: _titleController.text.trim(),
       days: _selectedDays,
       period: _period,
-      timeIn: _timeIn,
-      timeOut: _timeOut,
+      morningTimeIn: _activeMorningIn,
+      morningTimeOut: _activeMorningOut,
+      afternoonTimeIn: _activeAfternoonIn,
+      afternoonTimeOut: _activeAfternoonOut,
+      eveningTimeIn: _activeEveningIn,
       reminderMinutesBefore: _reminderMinutesBefore,
       reminderEnabled: _reminderEnabled,
     );
@@ -205,7 +243,7 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
             ),
             const SizedBox(height: 20),
             Text(
-              '3. Time Period & Range',
+              '3. Schedule Coverage & Times',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
@@ -219,7 +257,12 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
                   key: Key('event_period_${period.key}'),
                   label: Text(period.label),
                   selected: _period == period,
-                  onSelected: (_) => _selectPeriod(period),
+                  onSelected: (_) {
+                    setState(() {
+                      _period = period;
+                      _validationError = null;
+                    });
+                  },
                 );
               }).toList(),
             ),
@@ -231,51 +274,84 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
               ),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: InkWell(
-                    key: const Key('event_time_in'),
-                    onTap: () => _pickTime(isTimeIn: true),
-                    borderRadius: BorderRadius.circular(12),
-                    child: InputDecorator(
-                      decoration: const InputDecoration(
-                        labelText: 'Time In',
-                        suffixIcon: Icon(Icons.access_time, size: 20),
-                      ),
-                      child: Text(
-                        _timeIn.format12Hour(),
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
+            if (_period.hasMorning)
+              _EventRangeCard(
+                icon: Icons.wb_sunny_outlined,
+                title: 'Morning',
+                subtitle: 'Ends by 12:00 PM',
+                timeInKey: const Key('event_morning_in'),
+                timeOutKey: const Key('event_morning_out'),
+                timeIn: _morningTimeIn,
+                timeOut: _morningTimeOut,
+                onPickTimeIn: () => _pickTime(
+                  initial: _morningTimeIn,
+                  onPicked: (t) => _morningTimeIn = t,
+                ),
+                onPickTimeOut: () => _pickTime(
+                  initial: _morningTimeOut,
+                  onPicked: (t) => _morningTimeOut = t,
+                ),
+              ),
+            if (_period.hasAfternoon)
+              _EventRangeCard(
+                icon: Icons.wb_twilight_outlined,
+                title: 'Afternoon',
+                subtitle: 'Starts 12:00 PM or later',
+                timeInKey: const Key('event_afternoon_in'),
+                timeOutKey: const Key('event_afternoon_out'),
+                timeIn: _afternoonTimeIn,
+                timeOut: _afternoonTimeOut,
+                onPickTimeIn: () => _pickTime(
+                  initial: _afternoonTimeIn,
+                  onPicked: (t) => _afternoonTimeIn = t,
+                ),
+                onPickTimeOut: () => _pickTime(
+                  initial: _afternoonTimeOut,
+                  onPicked: (t) => _afternoonTimeOut = t,
+                ),
+              ),
+            Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                children: <Widget>[
+                  SwitchListTile(
+                    key: const Key('event_evening_toggle'),
+                    secondary: const Icon(Icons.nights_stay_outlined),
+                    title: const Text(
+                      'Evening (Optional)',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      _hasEvening
+                          ? 'Time In ${_eveningTimeIn.format12Hour()} (no Time Out)'
+                          : 'Off — enable for evening Time In only (5:00 PM+)',
+                    ),
+                    value: _hasEvening,
+                    onChanged: (value) {
+                      setState(() {
+                        _hasEvening = value;
+                        _validationError = null;
+                      });
+                    },
+                  ),
+                  if (_hasEvening)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                      child: _TimeSlotButton(
+                        key: const Key('event_evening_in'),
+                        label: 'Evening Time In (Optional · No Time Out)',
+                        timeText: _eveningTimeIn.format12Hour(),
+                        onTap: () => _pickTime(
+                          initial: _eveningTimeIn,
+                          onPicked: (t) => _eveningTimeIn = t,
                         ),
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: InkWell(
-                    key: const Key('event_time_out'),
-                    onTap: () => _pickTime(isTimeIn: false),
-                    borderRadius: BorderRadius.circular(12),
-                    child: InputDecorator(
-                      decoration: const InputDecoration(
-                        labelText: 'Time Out',
-                        suffixIcon: Icon(Icons.access_time, size: 20),
-                      ),
-                      child: Text(
-                        _timeOut.format12Hour(),
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
             if (_validationError != null) ...<Widget>[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 _validationError!,
                 key: const Key('event_validation_error'),
@@ -285,7 +361,7 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
                 ),
               ),
             ],
-            const SizedBox(height: 18),
+            const SizedBox(height: 14),
             Card(
               color: affected.isNotEmpty
                   ? theme.colorScheme.errorContainer.withValues(alpha: 0.7)
@@ -395,6 +471,121 @@ class _EventScheduleFormPageState extends State<EventScheduleFormPage> {
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(50),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EventRangeCard extends StatelessWidget {
+  const _EventRangeCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.timeInKey,
+    required this.timeOutKey,
+    required this.timeIn,
+    required this.timeOut,
+    required this.onPickTimeIn,
+    required this.onPickTimeOut,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Key timeInKey;
+  final Key timeOutKey;
+  final ScheduleTime timeIn;
+  final ScheduleTime timeOut;
+  final VoidCallback onPickTimeIn;
+  final VoidCallback onPickTimeOut;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(icon, size: 20, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: _TimeSlotButton(
+                    key: timeInKey,
+                    label: '$title Time In',
+                    timeText: timeIn.format12Hour(),
+                    onTap: onPickTimeIn,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _TimeSlotButton(
+                    key: timeOutKey,
+                    label: '$title Time Out',
+                    timeText: timeOut.format12Hour(),
+                    onTap: onPickTimeOut,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TimeSlotButton extends StatelessWidget {
+  const _TimeSlotButton({
+    super.key,
+    required this.label,
+    required this.timeText,
+    required this.onTap,
+  });
+
+  final String label;
+  final String timeText;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          suffixIcon: const Icon(Icons.access_time, size: 20),
+        ),
+        child: Text(
+          timeText,
+          style: theme.textTheme.bodyLarge?.copyWith(
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
