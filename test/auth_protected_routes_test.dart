@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:seireminds/core/supabase_config.dart';
 import 'package:seireminds/data/repositories/canvas_token_repository.dart';
 import 'package:seireminds/data/repositories/schedule_repository.dart';
 import 'package:seireminds/data/services/alarm_service.dart';
@@ -17,14 +19,14 @@ import 'package:seireminds/ui/core/app_routes.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _FakeAuthService implements AuthService {
-  _FakeAuthService({AuthSessionUser? initialUser}) : _user = initialUser;
+  _FakeAuthService({AuthSessionUser? initialUser}) : _user = initialUser {
+    _registeredEmails.add('student@hnu.edu.ph');
+  }
 
   final StreamController<AuthSessionUser?> _controller =
       StreamController<AuthSessionUser?>.broadcast();
+  final Set<String> _registeredEmails = <String>{};
   AuthSessionUser? _user;
-  int resendCalls = 0;
-  String? lastResendEmail;
-  bool failNextResend = false;
 
   @override
   AuthSessionUser? get currentUser => _user;
@@ -42,7 +44,8 @@ class _FakeAuthService implements AuthService {
     required String email,
     required String password,
   }) async {
-    if (email.trim() == 'student@hnu.edu.ph' && password == 'secret123') {
+    if (email.trim().toLowerCase() == 'student@hnu.edu.ph' &&
+        password == 'secret123') {
       _user = const AuthSessionUser(
         id: 'user-1',
         email: 'student@hnu.edu.ph',
@@ -67,28 +70,25 @@ class _FakeAuthService implements AuthService {
     required String password,
     String? displayName,
   }) async {
-    return const AuthActionResult(
-      succeeded: true,
-      requiresEmailConfirmation: true,
-      message:
-          'Account created! Check your email to confirm your address before signing in.',
-    );
-  }
-
-  @override
-  Future<AuthActionResult> resendSignUpConfirmation(String email) async {
-    if (failNextResend) {
-      failNextResend = false;
+    final normalized = email.trim().toLowerCase();
+    if (_registeredEmails.contains(normalized)) {
       return const AuthActionResult(
         succeeded: false,
-        message: 'Wait 60 seconds before requesting another email.',
+        message:
+            'An account with this email already exists. Please sign in instead.',
       );
     }
-    resendCalls++;
-    lastResendEmail = email;
-    return const AuthActionResult(
+    _registeredEmails.add(normalized);
+    _user = AuthSessionUser(
+      id: 'user-${_registeredEmails.length}',
+      email: normalized,
+      displayName: displayName?.trim(),
+    );
+    _controller.add(_user);
+    return AuthActionResult(
       succeeded: true,
-      message: 'Confirmation email resent. Check your inbox or spam folder.',
+      message: 'Account created and signed in as ${_user!.label}.',
+      user: _user,
     );
   }
 
@@ -387,7 +387,7 @@ void main() {
     );
 
     testWidgets(
-      'allows resending signup confirmation email up to 3 times and blocks further resends',
+      'creates account instantly without confirmation email and blocks duplicate email signups',
       (WidgetTester tester) async {
         final authService = _FakeAuthService();
         final repo = ScheduleRepository(
@@ -412,14 +412,10 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(
-          find.byKey(const Key('auth_resend_confirmation_button')),
-          findsNothing,
-        );
-
+        // Duplicate email (case-insensitive) is rejected.
         await tester.enterText(
           find.byKey(const Key('signup_email_field')),
-          'newstudent@hnu.edu.ph',
+          'STUDENT@hnu.edu.ph',
         );
         await tester.enterText(
           find.byKey(const Key('signup_password_field')),
@@ -432,67 +428,83 @@ void main() {
         await tester.tap(find.byKey(const Key('auth_sign_up_button')));
         await tester.pumpAndSettle();
 
-        final resendButton = find.byKey(
-          const Key('auth_resend_confirmation_button'),
-        );
-        expect(resendButton, findsOneWidget);
         expect(
-          find.text('Resend Confirmation Email (3 left)'),
+          find.text(
+            'An account with this email already exists. Please sign in instead.',
+          ),
           findsOneWidget,
         );
+        expect(find.textContaining('Resend Confirmation'), findsNothing);
 
-        // Failed resend should not consume one of the 3 attempts.
-        authService.failNextResend = true;
-        await tester.ensureVisible(resendButton);
-        await tester.tap(resendButton);
+        // Fresh email signs up and signs in immediately without any confirmation email step.
+        await tester.enterText(
+          find.byKey(const Key('signup_email_field')),
+          'newstudent@hnu.edu.ph',
+        );
+        final signUpBtn = find.byKey(const Key('auth_sign_up_button'));
+        await tester.ensureVisible(signUpBtn);
         await tester.pumpAndSettle();
-        expect(authService.resendCalls, 0);
+        await tester.tap(signUpBtn);
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('add_schedule_fab')), findsOneWidget);
+        expect(authService.currentUser?.email, 'newstudent@hnu.edu.ph');
+      },
+    );
+
+    test(
+      'SupabaseAuthService.signUp posts normalized lowercase email to signup-instant and surfaces duplicate 409 error',
+      () async {
+        late http.Request captured;
+        final service = SupabaseAuthService(
+          isAvailable: false,
+          httpClient: MockClient((http.Request req) async {
+            captured = req;
+            final body = jsonDecode(req.body) as Map<String, dynamic>;
+            if (body['email'] == 'dup@hnu.edu.ph') {
+              return http.Response(
+                jsonEncode(<String, Object>{
+                  'error':
+                      'An account with this email already exists. Please sign in instead.',
+                }),
+                409,
+              );
+            }
+            return http.Response(
+              jsonEncode(<String, Object>{
+                'user': <String, Object>{
+                  'id': 'u-1',
+                  'email': body['email'] as String,
+                },
+              }),
+              200,
+            );
+          }),
+        );
+
+        final dup = await service.signUp(
+          email: '  DUP@HNU.EDU.PH ',
+          password: 'password123',
+          displayName: 'Test',
+        );
+        expect(dup.succeeded, isFalse);
+        expect(dup.message, contains('already exists'));
         expect(
-          find.text('Wait 60 seconds before requesting another email.'),
-          findsOneWidget,
+          captured.url.toString(),
+          '${SupabaseConfig.url}/functions/v1/signup-instant',
         );
+        expect(captured.headers['apikey'], SupabaseConfig.publishableKey);
+        expect(captured.headers.containsKey('Authorization'), isFalse);
         expect(
-          find.text('Resend Confirmation Email (3 left)'),
-          findsOneWidget,
+          (jsonDecode(captured.body) as Map<String, dynamic>)['email'],
+          'dup@hnu.edu.ph',
         );
 
-        // Resend 1 -> 2 left.
-        await tester.tap(resendButton);
-        await tester.pumpAndSettle();
-        expect(authService.resendCalls, 1);
-        expect(authService.lastResendEmail, 'newstudent@hnu.edu.ph');
-        expect(
-          find.text('Resend Confirmation Email (2 left)'),
-          findsOneWidget,
+        final ok = await service.signUp(
+          email: 'fresh@hnu.edu.ph',
+          password: 'password123',
         );
-
-        // Resend 2 -> 1 left.
-        await tester.tap(resendButton);
-        await tester.pumpAndSettle();
-        expect(authService.resendCalls, 2);
-        expect(
-          find.text('Resend Confirmation Email (1 left)'),
-          findsOneWidget,
-        );
-
-        // Resend 3 -> limit reached, button disabled.
-        await tester.tap(resendButton);
-        await tester.pumpAndSettle();
-        expect(authService.resendCalls, 3);
-        expect(find.text('Resend Limit Reached (0/3)'), findsOneWidget);
-
-        // Tapping disabled button or re-submitting same email must not reset or exceed 3.
-        await tester.tap(resendButton);
-        await tester.pumpAndSettle();
-        expect(authService.resendCalls, 3);
-
-        await tester.ensureVisible(
-          find.byKey(const Key('auth_sign_up_button')),
-        );
-        await tester.tap(find.byKey(const Key('auth_sign_up_button')));
-        await tester.pumpAndSettle();
-        expect(find.text('Resend Limit Reached (0/3)'), findsOneWidget);
-        expect(authService.resendCalls, 3);
+        expect(ok.succeeded, isTrue);
       },
     );
   });

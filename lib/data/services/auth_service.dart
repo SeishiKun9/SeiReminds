@@ -1,3 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/supabase_config.dart';
@@ -26,13 +31,11 @@ class AuthActionResult {
   const AuthActionResult({
     required this.succeeded,
     required this.message,
-    this.requiresEmailConfirmation = false,
     this.user,
   });
 
   final bool succeeded;
   final String message;
-  final bool requiresEmailConfirmation;
   final AuthSessionUser? user;
 }
 
@@ -51,18 +54,21 @@ abstract class AuthService {
     String? displayName,
   });
 
-  Future<AuthActionResult> resendSignUpConfirmation(String email);
-
   Future<AuthActionResult> sendPasswordResetEmail(String email);
 
   Future<void> signOut();
 }
 
 class SupabaseAuthService implements AuthService {
-  SupabaseAuthService({this._authClient, this.isAvailable = true});
+  SupabaseAuthService({
+    this._authClient,
+    this.isAvailable = true,
+    this._httpClient,
+  });
 
   final GoTrueClient? _authClient;
   final bool isAvailable;
+  final http.Client? _httpClient;
 
   static const String _offlineAuthMessage =
       'Online account service is unavailable offline. Schedules, events, history, and alarms still work offline.';
@@ -113,7 +119,7 @@ class SupabaseAuthService implements AuthService {
     }
     try {
       final response = await auth.signInWithPassword(
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         password: password,
       );
       final user = _fromSupabaseUser(response.user);
@@ -138,6 +144,8 @@ class SupabaseAuthService implements AuthService {
     }
   }
 
+  /// Creates an already-confirmed account via the `signup-instant` Edge Function
+  /// (no confirmation email required, duplicate emails rejected) and signs in immediately.
   @override
   Future<AuthActionResult> signUp({
     required String email,
@@ -145,77 +153,89 @@ class SupabaseAuthService implements AuthService {
     String? displayName,
   }) async {
     final auth = _auth;
-    if (auth == null) {
+    if (auth == null && _httpClient == null) {
       return const AuthActionResult(
         succeeded: false,
         message: _offlineAuthMessage,
       );
     }
+
+    final normalizedEmail = email.trim().toLowerCase();
+    final trimmedName = displayName?.trim() ?? '';
+    final ownsClient = _httpClient == null;
+    final client = _httpClient ?? http.Client();
+
     try {
-      final trimmedName = displayName?.trim() ?? '';
-      final response = await auth.signUp(
-        email: email.trim(),
-        password: password,
-        emailRedirectTo: SupabaseConfig.authRedirectUrl,
-        data: trimmedName.isNotEmpty
-            ? <String, Object>{'display_name': trimmedName}
-            : null,
+      final response = await client
+          .post(
+            Uri.parse('${SupabaseConfig.url}/functions/v1/signup-instant'),
+            headers: const <String, String>{
+              'Content-Type': 'application/json',
+              'apikey': SupabaseConfig.publishableKey,
+            },
+            body: jsonEncode(<String, Object>{
+              'email': normalizedEmail,
+              'password': password,
+              if (trimmedName.isNotEmpty) 'display_name': trimmedName,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode != 200) {
+        String errorMsg = 'Could not create account (HTTP ${response.statusCode}).';
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map<String, dynamic> && decoded['error'] is String) {
+            errorMsg = decoded['error'] as String;
+          }
+        } catch (_) {}
+        return AuthActionResult(succeeded: false, message: errorMsg);
+      }
+    } on TimeoutException {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'Account creation timed out. Check your internet connection.',
       );
-      final user = _fromSupabaseUser(response.user);
-      final needsConfirm = response.session == null;
-      return AuthActionResult(
-        succeeded: true,
-        requiresEmailConfirmation: needsConfirm,
-        message: needsConfirm
-            ? 'Account created! Check your email to confirm your address before signing in.'
-            : 'Account created and signed in as ${user?.label ?? email.trim()}.',
-        user: user,
-      );
-    } on AuthException catch (e) {
-      return AuthActionResult(succeeded: false, message: e.message);
-    } catch (_) {
+    } on SocketException {
       return const AuthActionResult(
         succeeded: false,
         message: 'Could not create account. Check your internet connection.',
       );
+    } on http.ClientException {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'Could not create account. Check your internet connection.',
+      );
+    } finally {
+      if (ownsClient) {
+        client.close();
+      }
     }
-  }
 
-  @override
-  Future<AuthActionResult> resendSignUpConfirmation(String email) async {
-    final auth = _auth;
     if (auth == null) {
       return const AuthActionResult(
-        succeeded: false,
-        message: _offlineAuthMessage,
-      );
-    }
-    final trimmed = email.trim();
-    if (trimmed.isEmpty) {
-      return const AuthActionResult(
-        succeeded: false,
-        message: 'Enter your email address first.',
-      );
-    }
-    try {
-      await auth.resend(
-        type: OtpType.signup,
-        email: trimmed,
-        emailRedirectTo: SupabaseConfig.authRedirectUrl,
-      );
-      return const AuthActionResult(
         succeeded: true,
-        message: 'Confirmation email resent. Check your inbox or spam folder.',
-      );
-    } on AuthException catch (e) {
-      return AuthActionResult(succeeded: false, message: e.message);
-    } catch (_) {
-      return const AuthActionResult(
-        succeeded: false,
-        message:
-            'Could not resend confirmation email. Check your internet connection.',
+        message: 'Account created! You can now sign in.',
       );
     }
+
+    final signInResult = await signInWithPassword(
+      email: normalizedEmail,
+      password: password,
+    );
+    if (signInResult.succeeded) {
+      return AuthActionResult(
+        succeeded: true,
+        message:
+            'Account created and signed in as ${signInResult.user?.label ?? normalizedEmail}.',
+        user: signInResult.user,
+      );
+    }
+
+    return const AuthActionResult(
+      succeeded: false,
+      message: 'Account created, but automatic sign-in failed. Please sign in.',
+    );
   }
 
   @override
@@ -229,7 +249,7 @@ class SupabaseAuthService implements AuthService {
     }
     try {
       await auth.resetPasswordForEmail(
-        email.trim(),
+        email.trim().toLowerCase(),
         redirectTo: SupabaseConfig.authRedirectUrl,
       );
       return const AuthActionResult(

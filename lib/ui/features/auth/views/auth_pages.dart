@@ -286,6 +286,13 @@ class _SignUpPageState extends State<SignUpPage> {
                             fontWeight: FontWeight.w700,
                           ),
                         ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'One account per email. No confirmation email needed — you will be signed in right away.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                         const SizedBox(height: 16),
                         if (vm.errorMessage != null)
                           _AuthBanner(
@@ -379,38 +386,6 @@ class _SignUpPageState extends State<SignUpPage> {
                                 )
                               : const Text('Create Account'),
                         ),
-                        if (vm.pendingConfirmationEmail != null) ...<Widget>[
-                          const SizedBox(height: 12),
-                          OutlinedButton.icon(
-                            key: const Key('auth_resend_confirmation_button'),
-                            onPressed: vm.isBusy || !vm.canResendConfirmation
-                                ? null
-                                : vm.resendSignUpConfirmation,
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const Size.fromHeight(48),
-                            ),
-                            icon: const Icon(
-                              Icons.mark_email_unread_outlined,
-                              size: 18,
-                            ),
-                            label: Text(
-                              vm.canResendConfirmation
-                                  ? 'Resend Confirmation Email (${vm.confirmationResendsRemaining} left)'
-                                  : 'Resend Limit Reached (0/${AuthViewModel.maxConfirmationResends})',
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            vm.canResendConfirmation
-                                ? 'Confirmation email pending for ${vm.pendingConfirmationEmail}.'
-                                : 'Maximum ${AuthViewModel.maxConfirmationResends} resends reached for ${vm.pendingConfirmationEmail}. Check your spam folder or sign in once confirmed.',
-                            key: const Key('auth_resend_confirmation_hint'),
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
                         const SizedBox(height: 12),
                         TextButton(
                           onPressed: vm.isBusy
