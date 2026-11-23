@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 
+import '../../canvas/view_models/canvas_settings_view_model.dart';
+import '../../canvas/views/canvas_settings_page.dart';
 import '../view_models/schedule_view_model.dart';
 import 'alarm_setup_sheet.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key, required this.viewModel});
+  const SettingsPage({
+    super.key,
+    required this.viewModel,
+    this.canvasViewModel,
+  });
 
   final ScheduleViewModel viewModel;
+  final CanvasSettingsViewModel? canvasViewModel;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -159,6 +166,40 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
               ),
+              if (widget.canvasViewModel != null) ...<Widget>[
+                const SizedBox(height: 12),
+                ListenableBuilder(
+                  listenable: widget.canvasViewModel!,
+                  builder: (context, _) {
+                    final cvm = widget.canvasViewModel!;
+                    return Card(
+                      child: ListTile(
+                        key: const Key('open_canvas_settings_tile'),
+                        leading: Icon(
+                          Icons.school_outlined,
+                          color: theme.colorScheme.primary,
+                        ),
+                        title: const Text(
+                          'Canvas Settings',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          '${cvm.displayedStatus.label} · ${cvm.baseUrl}',
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.of(context).push<void>(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  CanvasSettingsPage(viewModel: cvm),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ],
               const SizedBox(height: 16),
               Card(
                 color: theme.colorScheme.secondaryContainer.withValues(
