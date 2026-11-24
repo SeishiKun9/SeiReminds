@@ -705,7 +705,7 @@ void main() {
     });
 
     test(
-      'daily storage cleanup clears yesterday Canvas data while protecting schedules, and only posts/notifies current-day items once',
+      'SQLite temporarily stores ONLY Canvas activities until deadline expires (never announcements) while protecting schedules',
       () async {
         var now = DateTime(2026, 11, 23, 10, 0);
         final db = _createInMemoryDb();
@@ -717,7 +717,7 @@ void main() {
         );
 
         try {
-          // Save an active schedule that MUST NEVER be deleted by daily cleanup.
+          // Save an active schedule that MUST NEVER be deleted by activity cleanup.
           await repo.saveSchedule(
             SubjectSchedule(
               id: 'protected-sched',
@@ -744,14 +744,27 @@ void main() {
             postedAt: DateTime(2026, 11, 23, 9, 15).toUtc(),
             postedDate: localDateKey(now),
           );
-          final todayAct = CanvasDailyItem(
-            id: 'act_200',
+          final activeDeadlineAct = CanvasDailyItem(
+            id: 'act_deadline',
             kind: CanvasDailyItemKind.activity,
             courseName: 'Networks',
-            title: 'Lab 4 Posted',
-            message: 'Submit by 5 PM.',
+            title: 'Lab 4 Submission',
+            message: 'Submit by Nov 25 5 PM.',
             postedAt: DateTime(2026, 11, 23, 8, 45).toUtc(),
             postedDate: localDateKey(now),
+            dueAt: DateTime(2026, 11, 25, 17, 0).toUtc(),
+            expiresAt: DateTime(2026, 11, 25, 17, 0).toUtc(),
+          );
+          final expiredAct = CanvasDailyItem(
+            id: 'act_expired',
+            kind: CanvasDailyItemKind.activity,
+            courseName: 'Networks',
+            title: 'Past Deadline Quiz',
+            message: 'Already closed.',
+            postedAt: DateTime(2026, 11, 22, 8, 0).toUtc(),
+            postedDate: localDateKey(DateTime(2026, 11, 22)),
+            dueAt: DateTime(2026, 11, 23, 9, 0).toUtc(),
+            expiresAt: DateTime(2026, 11, 23, 9, 0).toUtc(),
           );
           final yesterdayAnn = CanvasDailyItem(
             id: 'ann_old',
@@ -763,47 +776,51 @@ void main() {
             postedDate: localDateKey(DateTime(2026, 11, 22)),
           );
 
-          // First sync on Nov 23: ONLY today's 2 items are stored and notified!
+          // First sync on Nov 23:
+          // - todayAnn stays in memory ONLY (NEVER in SQLite!).
+          // - activeDeadlineAct IS temporarily stored in SQLite until Nov 25 5 PM.
+          // - expiredAct & yesterdayAnn are ignored completely.
           final firstSync = await repo.syncTodayCanvasItems(<CanvasDailyItem>[
             todayAnn,
-            todayAct,
+            activeDeadlineAct,
+            expiredAct,
             yesterdayAnn,
           ]);
-          expect(firstSync.todayItems.length, 2);
-          expect(
-            firstSync.todayItems.any((i) => i.id == 'ann_old'),
-            isFalse,
-          );
+          expect(firstSync.todayAnnouncements.length, 1);
+          expect(firstSync.todayAnnouncements.first.id, 'ann_100');
+          expect(firstSync.activeActivities.length, 1);
+          expect(firstSync.activeActivities.first.id, 'act_deadline');
           expect(firstSync.newlyNotifiedCount, 2);
           expect(alarmService.canvasNotifications.length, 2);
 
-          // Second sync later on Nov 23: does NOT re-notify already notified today items!
+          // Verify SQLite directly contains ONLY the activity (ZERO announcements!).
+          final storedInSqlite = await db.loadActiveCanvasActivities(now: now);
+          expect(storedInSqlite.length, 1);
+          expect(storedInSqlite.first.id, 'act_deadline');
+          expect(storedInSqlite.first.kind, CanvasDailyItemKind.activity);
+
+          // Re-sync on Nov 23: does NOT re-notify already notified items.
           final secondSync = await repo.syncTodayCanvasItems(<CanvasDailyItem>[
             todayAnn,
-            todayAct,
-            yesterdayAnn,
+            activeDeadlineAct,
           ]);
-          expect(secondSync.todayItems.length, 2);
           expect(secondSync.newlyNotifiedCount, 0);
           expect(alarmService.canvasNotifications.length, 2);
 
-          // Advance to next day (Nov 24): daily cleanup deletes Nov 23 items to save storage,
-          // keeps saved schedules untouched, and NEVER re-posts or re-notifies Nov 23 items!
-          now = DateTime(2026, 11, 24, 7, 30);
-          final nextDaySnapshot = await repo.loadAllAndSync();
-          expect(nextDaySnapshot.todayCanvasItems, isEmpty);
-          expect(nextDaySnapshot.lastDailyCleanupDate, '2026-11-24');
-          expect(nextDaySnapshot.lastDailyCleanupRemoved, 2);
-          expect(nextDaySnapshot.schedules.length, 1);
+          // On Nov 24 (BEFORE Nov 25 5 PM deadline): activity STILL stays in SQLite!
+          now = DateTime(2026, 11, 24, 12, 0);
+          final beforeDeadline = await repo.loadAllAndSync();
+          expect(beforeDeadline.activeCanvasActivities.length, 1);
+          expect(beforeDeadline.activeCanvasActivities.first.id, 'act_deadline');
+          expect(beforeDeadline.schedules.length, 1);
 
-          // Even if Canvas returns Nov 23 items on Nov 24, they are NOT re-posted or re-notified.
-          final nextDaySync = await repo.syncTodayCanvasItems(<CanvasDailyItem>[
-            todayAnn,
-            todayAct,
-          ]);
-          expect(nextDaySync.todayItems, isEmpty);
-          expect(nextDaySync.newlyNotifiedCount, 0);
-          expect(alarmService.canvasNotifications.length, 2);
+          // On Nov 25 5:01 PM (AFTER deadline is up): activity is automatically deleted from SQLite,
+          // and saved class schedules remain completely untouched!
+          now = DateTime(2026, 11, 25, 17, 1);
+          final afterDeadline = await repo.loadAllAndSync();
+          expect(afterDeadline.activeCanvasActivities, isEmpty);
+          expect(afterDeadline.lastDailyCleanupRemoved, 1);
+          expect(afterDeadline.schedules.length, 1);
         } finally {
           await repo.close();
         }

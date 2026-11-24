@@ -31,8 +31,31 @@ class ScheduleViewModel extends ChangeNotifier {
   List<HistoryEntry> _archivedHistory = const <HistoryEntry>[];
   List<HistoryEntry> get archivedHistory => _archivedHistory;
 
-  List<CanvasDailyItem> _todayCanvasItems = const <CanvasDailyItem>[];
-  List<CanvasDailyItem> get todayCanvasItems => _todayCanvasItems;
+  // Stored temporarily in SQLite ONLY until deadline expires.
+  List<CanvasDailyItem> _activeCanvasActivities = const <CanvasDailyItem>[];
+  List<CanvasDailyItem> get canvasActivities => _activeCanvasActivities;
+
+  // Live current-day announcements kept in memory ONLY (never saved to SQLite).
+  List<CanvasDailyItem> _todayCanvasAnnouncements = const <CanvasDailyItem>[];
+  List<CanvasDailyItem> get canvasAnnouncements => _todayCanvasAnnouncements;
+
+  List<CanvasDailyItem> get canvasGeneralItems {
+    final combined = <CanvasDailyItem>[
+      ..._todayCanvasAnnouncements,
+      ..._activeCanvasActivities,
+    ]..sort((a, b) => b.postedAt.compareTo(a.postedAt));
+    return combined;
+  }
+
+  List<CanvasDailyItem> get canvasReminders {
+    final upcoming = List<CanvasDailyItem>.of(_activeCanvasActivities)
+      ..sort(
+        (a, b) => a.effectiveExpiresAt.compareTo(b.effectiveExpiresAt),
+      );
+    return upcoming;
+  }
+
+  List<CanvasDailyItem> get todayCanvasItems => canvasGeneralItems;
 
   String? _lastDailyCleanupDate;
   String? get lastDailyCleanupDate => _lastDailyCleanupDate;
@@ -123,7 +146,7 @@ class ScheduleViewModel extends ChangeNotifier {
     _events = snapshot.events;
     _activeHistory = snapshot.activeHistory;
     _archivedHistory = snapshot.archivedHistory;
-    _todayCanvasItems = snapshot.todayCanvasItems;
+    _activeCanvasActivities = snapshot.activeCanvasActivities;
     _lastDailyCleanupDate = snapshot.lastDailyCleanupDate;
     _lastDailyCleanupRemoved = snapshot.lastDailyCleanupRemoved;
     _bannerMessage = snapshot.alarmSyncWarning;
@@ -148,11 +171,13 @@ class ScheduleViewModel extends ChangeNotifier {
     }
   }
 
-  /// Runs daily cleanup automatically when the local calendar day rolls over.
+  /// Purges expired activities automatically on resume / day rollover and clears stale in-memory announcements.
   Future<void> checkDailyRolloverCleanup() async {
     if (!_hasInitialized) return;
     final todayKey = localDateKey(_clock());
-    if (_lastDailyCleanupDate == todayKey) return;
+    if (_lastDailyCleanupDate != todayKey) {
+      _todayCanvasAnnouncements = const <CanvasDailyItem>[];
+    }
     await runDailyStorageCleanup();
   }
 
@@ -169,8 +194,8 @@ class ScheduleViewModel extends ChangeNotifier {
     }
   }
 
-  /// Fetches and stores ONLY today's Canvas announcements & activities,
-  /// clears yesterday's cache, and posts notifications only for new today items.
+  /// Syncs Canvas announcements (in-memory today-only) and activities
+  /// (stored temporarily in SQLite ONLY until their deadline expires).
   Future<CanvasTodaySyncResult> syncTodayCanvasUpdates(
     CanvasTokenRepository canvasRepository,
   ) async {
@@ -178,7 +203,8 @@ class ScheduleViewModel extends ChangeNotifier {
       return CanvasTodaySyncResult(
         succeeded: false,
         message: 'Canvas sync is already in progress.',
-        todayItems: _todayCanvasItems,
+        todayAnnouncements: _todayCanvasAnnouncements,
+        activeActivities: _activeCanvasActivities,
         newlyNotifiedCount: 0,
         clearedStaleCount: 0,
       );
@@ -190,7 +216,8 @@ class ScheduleViewModel extends ChangeNotifier {
     try {
       final fetched = await canvasRepository.fetchTodayUpdates(now: _clock());
       final result = await _repository.syncTodayCanvasItems(fetched);
-      _todayCanvasItems = result.todayItems;
+      _todayCanvasAnnouncements = result.todayAnnouncements;
+      _activeCanvasActivities = result.activeActivities;
       _lastDailyCleanupDate = localDateKey(_clock());
       _canvasSyncMessage = result.message;
       return result;
@@ -199,7 +226,8 @@ class ScheduleViewModel extends ChangeNotifier {
       return CanvasTodaySyncResult(
         succeeded: false,
         message: e.message,
-        todayItems: _todayCanvasItems,
+        todayAnnouncements: _todayCanvasAnnouncements,
+        activeActivities: _activeCanvasActivities,
         newlyNotifiedCount: 0,
         clearedStaleCount: 0,
       );
@@ -210,7 +238,8 @@ class ScheduleViewModel extends ChangeNotifier {
       return CanvasTodaySyncResult(
         succeeded: false,
         message: msg,
-        todayItems: _todayCanvasItems,
+        todayAnnouncements: _todayCanvasAnnouncements,
+        activeActivities: _activeCanvasActivities,
         newlyNotifiedCount: 0,
         clearedStaleCount: 0,
       );
@@ -222,7 +251,8 @@ class ScheduleViewModel extends ChangeNotifier {
 
   Future<void> clearCanvasDailyCache() async {
     await _repository.clearCanvasDailyCache();
-    _todayCanvasItems = const <CanvasDailyItem>[];
+    _todayCanvasAnnouncements = const <CanvasDailyItem>[];
+    _activeCanvasActivities = const <CanvasDailyItem>[];
     _canvasSyncMessage = null;
     notifyListeners();
   }

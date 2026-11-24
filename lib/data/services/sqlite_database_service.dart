@@ -13,7 +13,7 @@ class SqliteScheduleDatabase {
   });
 
   static const String dbFileName = 'seireminds.db';
-  static const int _dbVersion = 3;
+  static const int _dbVersion = 4;
   static const String _metaLastCleanupDate = 'last_daily_cleanup_date';
   static const String _metaLastCleanupRemoved = 'last_daily_cleanup_removed';
 
@@ -83,10 +83,10 @@ class SqliteScheduleDatabase {
       )
     ''');
 
-    await _createDailyCacheTablesV3(db);
+    await _createMetaAndActivityTablesV4(db);
   }
 
-  Future<void> _createDailyCacheTablesV3(DatabaseExecutor db) async {
+  Future<void> _createMetaAndActivityTablesV4(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS app_meta (
         key TEXT PRIMARY KEY,
@@ -94,22 +94,23 @@ class SqliteScheduleDatabase {
       )
     ''');
 
+    // ONLY Canvas activity notifications are allowed to be stored temporarily
+    // in SQLite, strictly until their deadline (`expires_at`) is up.
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS canvas_daily_items (
-        item_id TEXT NOT NULL,
-        posted_date TEXT NOT NULL,
-        kind TEXT NOT NULL,
+      CREATE TABLE IF NOT EXISTS canvas_activities (
+        item_id TEXT PRIMARY KEY,
         course_name TEXT NOT NULL,
         title TEXT NOT NULL,
         message TEXT NOT NULL,
         posted_at TEXT NOT NULL,
-        notified INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (item_id, posted_date)
+        due_at TEXT,
+        expires_at TEXT NOT NULL,
+        notified INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
     await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_canvas_daily_items_date ON canvas_daily_items(posted_date)',
+      'CREATE INDEX IF NOT EXISTS idx_canvas_activities_expires ON canvas_activities(expires_at)',
     );
   }
 
@@ -190,8 +191,10 @@ class SqliteScheduleDatabase {
       });
     }
 
-    if (oldVersion < 3) {
-      await _createDailyCacheTablesV3(db);
+    if (oldVersion < 4) {
+      await _createMetaAndActivityTablesV4(db);
+      // Drop legacy v3 mixed cache so only temporary activity notifications live in SQLite.
+      await db.execute('DROP TABLE IF EXISTS canvas_daily_items');
     }
   }
 
@@ -562,18 +565,20 @@ class SqliteScheduleDatabase {
     });
   }
 
-  /// Clears transient Canvas announcement/activity cache from previous days
+  /// Purges expired temporary Canvas activities whose deadline is up (`expires_at <= now`)
   /// to save device storage. Validates that saved class schedules remain untouched.
   Future<DailyCleanupResult> runDailyStorageCleanup({DateTime? now}) async {
     final db = await _open();
-    final todayKey = localDateKey(now ?? DateTime.now());
+    final current = now ?? DateTime.now();
+    final currentUtcIso = current.toUtc().toIso8601String();
+    final todayKey = localDateKey(current);
 
     return db.transaction((txn) async {
       final beforeScheduleIds = await _readScheduleIds(txn);
       final removed = await txn.delete(
-        'canvas_daily_items',
-        where: 'posted_date != ?',
-        whereArgs: <Object>[todayKey],
+        'canvas_activities',
+        where: 'expires_at <= ?',
+        whereArgs: <Object>[currentUtcIso],
       );
       await _recordDailyCleanupMeta(txn, todayKey: todayKey, removedNow: removed);
       final afterScheduleIds = await _readScheduleIds(txn);
@@ -582,65 +587,85 @@ class SqliteScheduleDatabase {
     });
   }
 
-  /// Runs daily cleanup first, discards any non-today items, stores only
-  /// current-day items, and returns all today items plus newly unnotified items.
+  /// Stores ONLY Canvas activity notifications temporarily in SQLite until their
+  /// deadline (`expires_at`) is up. Announcements are NEVER stored in SQLite.
   Future<
       ({
-        List<CanvasDailyItem> todayItems,
+        List<CanvasDailyItem> activeActivities,
         List<CanvasDailyItem> newlyUnnotified,
         DailyCleanupResult cleanup,
-      })> syncTodayCanvasItems(
+      })> syncCanvasActivities(
     List<CanvasDailyItem> incoming, {
     DateTime? now,
   }) async {
     final db = await _open();
     final current = now ?? DateTime.now();
+    final currentUtc = current.toUtc();
+    final currentUtcIso = currentUtc.toIso8601String();
     final todayKey = localDateKey(current);
 
     return db.transaction((txn) async {
       final beforeScheduleIds = await _readScheduleIds(txn);
       final removed = await txn.delete(
-        'canvas_daily_items',
-        where: 'posted_date != ?',
-        whereArgs: <Object>[todayKey],
+        'canvas_activities',
+        where: 'expires_at <= ?',
+        whereArgs: <Object>[currentUtcIso],
       );
       await _recordDailyCleanupMeta(txn, todayKey: todayKey, removedNow: removed);
 
       for (final item in incoming) {
-        if (!isPostedOnCurrentDay(item.postedAt, now: current)) {
-          continue;
-        }
-        await txn.insert(
-          'canvas_daily_items',
+        // Strict storage policy: ONLY unexpired activity notifications may enter SQLite.
+        if (item.kind != CanvasDailyItemKind.activity) continue;
+        final expiresAtUtc = item.effectiveExpiresAt;
+        if (!expiresAtUtc.isAfter(currentUtc)) continue;
+
+        final inserted = await txn.insert(
+          'canvas_activities',
           <String, Object?>{
             'item_id': item.id,
-            'posted_date': todayKey,
-            'kind': item.kind.key,
             'course_name': item.courseName,
             'title': item.title,
             'message': item.message,
             'posted_at': item.postedAt.toUtc().toIso8601String(),
+            'due_at': item.dueAt?.toUtc().toIso8601String(),
+            'expires_at': expiresAtUtc.toIso8601String(),
             'notified': 0,
           },
           conflictAlgorithm: ConflictAlgorithm.ignore,
         );
+
+        // If the activity already existed, keep its notified flag while refreshing deadline/details.
+        if (inserted == 0) {
+          await txn.update(
+            'canvas_activities',
+            <String, Object?>{
+              'course_name': item.courseName,
+              'title': item.title,
+              'message': item.message,
+              'due_at': item.dueAt?.toUtc().toIso8601String(),
+              'expires_at': expiresAtUtc.toIso8601String(),
+            },
+            where: 'item_id = ?',
+            whereArgs: <Object>[item.id],
+          );
+        }
       }
 
       final rows = await txn.query(
-        'canvas_daily_items',
-        where: 'posted_date = ?',
-        whereArgs: <Object>[todayKey],
-        orderBy: 'posted_at DESC',
+        'canvas_activities',
+        where: 'expires_at > ?',
+        whereArgs: <Object>[currentUtcIso],
+        orderBy: 'expires_at ASC, posted_at DESC',
       );
-      final todayItems = rows.map(_rowToCanvasDailyItem).toList();
+      final activeActivities = rows.map(_rowToCanvasActivity).toList();
       final newlyUnnotified =
-          todayItems.where((item) => !item.notified).toList();
+          activeActivities.where((item) => !item.notified).toList();
 
       final afterScheduleIds = await _readScheduleIds(txn);
       _assertSchedulesUnchanged(beforeScheduleIds, afterScheduleIds);
 
       return (
-        todayItems: todayItems,
+        activeActivities: activeActivities,
         newlyUnnotified: newlyUnnotified,
         cleanup: DailyCleanupResult(
           dateKey: todayKey,
@@ -650,34 +675,33 @@ class SqliteScheduleDatabase {
     });
   }
 
-  Future<void> markCanvasItemsNotified(
-    List<String> itemIds, {
-    required String postedDate,
-  }) async {
+  Future<void> markCanvasActivitiesNotified(List<String> itemIds) async {
     if (itemIds.isEmpty) return;
     final db = await _open();
     await db.transaction((txn) async {
       for (final id in itemIds) {
         await txn.update(
-          'canvas_daily_items',
+          'canvas_activities',
           const <String, Object?>{'notified': 1},
-          where: 'item_id = ? AND posted_date = ?',
-          whereArgs: <Object>[id, postedDate],
+          where: 'item_id = ?',
+          whereArgs: <Object>[id],
         );
       }
     });
   }
 
-  Future<List<CanvasDailyItem>> loadTodayCanvasItems({DateTime? now}) async {
+  Future<List<CanvasDailyItem>> loadActiveCanvasActivities({
+    DateTime? now,
+  }) async {
     final db = await _open();
-    final todayKey = localDateKey(now ?? DateTime.now());
+    final currentUtcIso = (now ?? DateTime.now()).toUtc().toIso8601String();
     final rows = await db.query(
-      'canvas_daily_items',
-      where: 'posted_date = ?',
-      whereArgs: <Object>[todayKey],
-      orderBy: 'posted_at DESC',
+      'canvas_activities',
+      where: 'expires_at > ?',
+      whereArgs: <Object>[currentUtcIso],
+      orderBy: 'expires_at ASC, posted_at DESC',
     );
-    return rows.map(_rowToCanvasDailyItem).toList();
+    return rows.map(_rowToCanvasActivity).toList();
   }
 
   Future<({String? lastDate, int lastRemovedCount})>
@@ -706,7 +730,7 @@ class SqliteScheduleDatabase {
     final db = await _open();
     await db.transaction((txn) async {
       final beforeScheduleIds = await _readScheduleIds(txn);
-      await txn.delete('canvas_daily_items');
+      await txn.delete('canvas_activities');
       final afterScheduleIds = await _readScheduleIds(txn);
       _assertSchedulesUnchanged(beforeScheduleIds, afterScheduleIds);
     });
@@ -748,15 +772,20 @@ class SqliteScheduleDatabase {
     );
   }
 
-  CanvasDailyItem _rowToCanvasDailyItem(Map<String, Object?> row) {
+  CanvasDailyItem _rowToCanvasActivity(Map<String, Object?> row) {
+    final postedAt = DateTime.parse(row['posted_at'] as String).toUtc();
+    final rawDue = row['due_at'] as String?;
+    final expiresAt = DateTime.parse(row['expires_at'] as String).toUtc();
     return CanvasDailyItem(
       id: row['item_id'] as String,
-      kind: CanvasDailyItemKind.fromKey(row['kind'] as String),
+      kind: CanvasDailyItemKind.activity,
       courseName: row['course_name'] as String,
       title: row['title'] as String,
       message: row['message'] as String,
-      postedAt: DateTime.parse(row['posted_at'] as String).toUtc(),
-      postedDate: row['posted_date'] as String,
+      postedAt: postedAt,
+      postedDate: localDateKey(postedAt),
+      dueAt: rawDue != null ? DateTime.parse(rawDue).toUtc() : null,
+      expiresAt: expiresAt,
       notified: (row['notified'] as int) == 1,
     );
   }

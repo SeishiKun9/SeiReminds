@@ -14,6 +14,7 @@ import 'ui/core/app_theme.dart';
 import 'ui/features/auth/view_models/auth_view_model.dart';
 import 'ui/features/auth/views/auth_pages.dart';
 import 'ui/features/canvas/view_models/canvas_settings_view_model.dart';
+import 'ui/features/canvas/views/canvas_hub_page.dart';
 import 'ui/features/canvas/views/canvas_settings_page.dart';
 import 'ui/features/schedule/view_models/schedule_view_model.dart';
 import 'ui/features/schedule/views/schedule_home_page.dart';
@@ -162,6 +163,16 @@ class _SeiRemindsAppState extends State<SeiRemindsApp> {
           canvasViewModel: _canvasViewModel,
           authViewModel: _authViewModel,
         );
+      case AppRoutes.canvasHub:
+        page = _canvasViewModel != null
+            ? CanvasHubPage(
+                scheduleViewModel: _viewModel,
+                canvasViewModel: _canvasViewModel!,
+              )
+            : ScheduleHomePage(
+                viewModel: _viewModel,
+                authViewModel: _authViewModel,
+              );
       case AppRoutes.canvasSettings:
         page = _canvasViewModel != null
             ? CanvasSettingsPage(viewModel: _canvasViewModel!)

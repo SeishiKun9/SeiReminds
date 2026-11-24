@@ -408,6 +408,19 @@ int stableCanvasNotificationId(String itemId, String postedDate) {
   return (hash & 0x1FFFFFFF) + 50000;
 }
 
+/// Returns the end of [dt]'s local calendar day (`23:59:59.999`) in UTC.
+DateTime endOfLocalDay(DateTime dt) {
+  final local = dt.toLocal();
+  return DateTime(local.year, local.month, local.day, 23, 59, 59, 999).toUtc();
+}
+
+/// Returns true only when [expiresAt] is strictly in the future relative to [now].
+bool isBeforeDeadline(DateTime? expiresAt, {DateTime? now}) {
+  if (expiresAt == null) return false;
+  final currentUtc = (now ?? DateTime.now()).toUtc();
+  return expiresAt.toUtc().isAfter(currentUtc);
+}
+
 enum CanvasDailyItemKind {
   announcement('announcement', 'Announcement'),
   activity('activity', 'Activity');
@@ -423,7 +436,8 @@ enum CanvasDailyItemKind {
   }
 }
 
-/// A Canvas announcement or activity posted on the current local day.
+/// A Canvas announcement (in-memory today-only) or activity (stored temporarily
+/// in SQLite ONLY until its deadline [effectiveExpiresAt] expires).
 class CanvasDailyItem {
   const CanvasDailyItem({
     required this.id,
@@ -433,6 +447,8 @@ class CanvasDailyItem {
     required this.message,
     required this.postedAt,
     required this.postedDate,
+    this.dueAt,
+    this.expiresAt,
     this.notified = false,
   });
 
@@ -443,7 +459,14 @@ class CanvasDailyItem {
   final String message;
   final DateTime postedAt;
   final String postedDate;
+  final DateTime? dueAt;
+  final DateTime? expiresAt;
   final bool notified;
+
+  bool get hasExplicitDeadline => dueAt != null;
+
+  DateTime get effectiveExpiresAt =>
+      (expiresAt ?? dueAt ?? endOfLocalDay(postedAt)).toUtc();
 }
 
 class DailyCleanupResult {
@@ -460,14 +483,24 @@ class CanvasTodaySyncResult {
   const CanvasTodaySyncResult({
     required this.succeeded,
     required this.message,
-    required this.todayItems,
+    required this.todayAnnouncements,
+    required this.activeActivities,
     required this.newlyNotifiedCount,
     required this.clearedStaleCount,
   });
 
   final bool succeeded;
   final String message;
-  final List<CanvasDailyItem> todayItems;
+  final List<CanvasDailyItem> todayAnnouncements;
+  final List<CanvasDailyItem> activeActivities;
   final int newlyNotifiedCount;
   final int clearedStaleCount;
+
+  List<CanvasDailyItem> get todayItems {
+    final combined = <CanvasDailyItem>[
+      ...todayAnnouncements,
+      ...activeActivities,
+    ]..sort((a, b) => b.postedAt.compareTo(a.postedAt));
+    return combined;
+  }
 }

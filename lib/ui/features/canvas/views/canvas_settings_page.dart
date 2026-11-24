@@ -323,7 +323,7 @@ class _CanvasSettingsPageState extends State<CanvasSettingsPage> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Only items posted today are shown and notified once. Previous days are cleared daily to save storage.',
+                          'Only activity notifications are stored temporarily in SQLite until their deadline expires. Announcements stay live for today only.',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),

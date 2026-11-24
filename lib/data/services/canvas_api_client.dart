@@ -220,7 +220,7 @@ class CanvasApiClient {
       }
     }
 
-    // 3. Fetch personal activity stream for today's activities (submissions, assignments, discussions, etc.).
+    // 3. Fetch personal activity stream (today's activities + deadline-bearing activities).
     final streamResponse = await _safeGet(
       Uri.parse('$normalizedBase/api/v1/users/self/activity_stream?per_page=50'),
       headers: headers,
@@ -231,6 +231,8 @@ class CanvasApiClient {
       contextLabel: 'Canvas activity stream response',
     );
 
+    final seenAssignmentIds = <String>{};
+
     for (final raw in streamList.whereType<Map<String, dynamic>>()) {
       final rawId = raw['id']?.toString() ?? '';
       // Prefer created_at (when the activity was sent); fall back to updated_at only if absent.
@@ -238,39 +240,156 @@ class CanvasApiClient {
           (raw['created_at'] as String?) ?? (raw['updated_at'] as String?);
       if (rawId.isEmpty || sentRaw == null) continue;
       final postedAt = DateTime.tryParse(sentRaw)?.toUtc();
-      if (postedAt == null || !isPostedOnCurrentDay(postedAt, now: current)) {
-        continue;
-      }
+      if (postedAt == null) continue;
 
       final typeRaw = (raw['type'] as String?)?.trim() ?? 'Activity';
       final isAnnouncement = typeRaw.toLowerCase() == 'announcement';
-      final linkedAnnouncementId = raw['announcement_id']?.toString() ?? rawId;
-      if (isAnnouncement && seenAnnouncementIds.contains(linkedAnnouncementId)) {
+
+      // Extract optional assignment deadline (due_at) if present on activity.
+      final assignmentMap = raw['assignment'] is Map<String, dynamic>
+          ? raw['assignment'] as Map<String, dynamic>
+          : null;
+      final rawDue = (assignmentMap?['due_at'] as String?) ??
+          (raw['due_at'] as String?);
+      final dueAt = rawDue != null ? DateTime.tryParse(rawDue)?.toUtc() : null;
+
+      if (isAnnouncement) {
+        if (!isPostedOnCurrentDay(postedAt, now: current)) continue;
+        final linkedAnnouncementId = raw['announcement_id']?.toString() ?? rawId;
+        if (seenAnnouncementIds.contains(linkedAnnouncementId)) continue;
+        final courseId = raw['course_id']?.toString() ?? '';
+        final courseName = courseNames[courseId] ?? 'Canvas';
+        final title = (raw['title'] as String?)?.trim();
+        final message = stripCanvasHtml((raw['message'] as String?) ?? '');
+        final canonicalId = 'ann_$linkedAnnouncementId';
+
+        itemsById.putIfAbsent(
+          canonicalId,
+          () => CanvasDailyItem(
+            id: canonicalId,
+            kind: CanvasDailyItemKind.announcement,
+            courseName: courseName,
+            title: (title != null && title.isNotEmpty) ? title : 'Announcement',
+            message: message,
+            postedAt: postedAt,
+            postedDate: todayKey,
+          ),
+        );
         continue;
+      }
+
+      // Activity filtering:
+      // - If an explicit deadline exists, keep only while deadline is still ahead.
+      // - Otherwise keep only if posted today (expires at end of current local day).
+      if (dueAt != null) {
+        if (!isBeforeDeadline(dueAt, now: current)) continue;
+      } else if (!isPostedOnCurrentDay(postedAt, now: current)) {
+        continue;
+      }
+
+      final assignmentId = assignmentMap?['id']?.toString() ??
+          raw['assignment_id']?.toString();
+      if (assignmentId != null && assignmentId.isNotEmpty) {
+        seenAssignmentIds.add(assignmentId);
       }
 
       final courseId = raw['course_id']?.toString() ?? '';
       final courseName = courseNames[courseId] ?? 'Canvas';
       final title = (raw['title'] as String?)?.trim();
       final message = stripCanvasHtml((raw['message'] as String?) ?? '');
-      final canonicalId = isAnnouncement
-          ? 'ann_$linkedAnnouncementId'
+      final canonicalId = assignmentId != null && assignmentId.isNotEmpty
+          ? 'act_assignment_$assignmentId'
           : 'act_${typeRaw.toLowerCase()}_$rawId';
 
       itemsById.putIfAbsent(
         canonicalId,
         () => CanvasDailyItem(
           id: canonicalId,
-          kind: isAnnouncement
-              ? CanvasDailyItemKind.announcement
-              : CanvasDailyItemKind.activity,
+          kind: CanvasDailyItemKind.activity,
           courseName: courseName,
           title: (title != null && title.isNotEmpty) ? title : typeRaw,
           message: message,
           postedAt: postedAt,
-          postedDate: todayKey,
+          postedDate: localDateKey(postedAt),
+          dueAt: dueAt,
+          expiresAt: dueAt ?? endOfLocalDay(current),
         ),
       );
+    }
+
+    // 4. Best-effort fetch of upcoming Canvas assignment activities with explicit deadlines.
+    try {
+      final upcomingResponse = await _httpClient
+          .get(
+            Uri.parse('$normalizedBase/api/v1/users/self/upcoming_events'),
+            headers: headers,
+          )
+          .timeout(_timeout);
+      if (upcomingResponse.statusCode == 200) {
+        final decoded = jsonDecode(upcomingResponse.body);
+        if (decoded is List<dynamic>) {
+          for (final raw in decoded.whereType<Map<String, dynamic>>()) {
+            final assignment = raw['assignment'] is Map<String, dynamic>
+                ? raw['assignment'] as Map<String, dynamic>
+                : null;
+            final rawDue = (assignment?['due_at'] as String?) ??
+                (raw['end_at'] as String?) ??
+                (raw['start_at'] as String?);
+            if (rawDue == null) continue;
+            final dueAt = DateTime.tryParse(rawDue)?.toUtc();
+            if (dueAt == null || !isBeforeDeadline(dueAt, now: current)) {
+              continue;
+            }
+
+            final assignmentId =
+                assignment?['id']?.toString() ?? raw['id']?.toString() ?? '';
+            if (assignmentId.isEmpty || seenAssignmentIds.contains(assignmentId)) {
+              continue;
+            }
+            seenAssignmentIds.add(assignmentId);
+
+            final contextCode = (raw['context_code'] as String?) ?? '';
+            final courseId = contextCode.startsWith('course_')
+                ? contextCode.substring('course_'.length)
+                : (assignment?['course_id']?.toString() ?? '');
+            final courseName = (raw['context_name'] as String?)?.trim() ??
+                courseNames[courseId] ??
+                'Canvas Course';
+            final title = (raw['title'] as String?)?.trim() ??
+                (assignment?['name'] as String?)?.trim() ??
+                'Upcoming Activity';
+            final message = stripCanvasHtml(
+              (raw['description'] as String?) ??
+                  (assignment?['description'] as String?) ??
+                  '',
+            );
+            final postedRaw = (assignment?['created_at'] as String?) ??
+                (raw['created_at'] as String?);
+            final postedAt =
+                (postedRaw != null ? DateTime.tryParse(postedRaw) : null)
+                    ?.toUtc() ??
+                current.toUtc();
+            final canonicalId = 'act_assignment_$assignmentId';
+
+            itemsById.putIfAbsent(
+              canonicalId,
+              () => CanvasDailyItem(
+                id: canonicalId,
+                kind: CanvasDailyItemKind.activity,
+                courseName: courseName,
+                title: title,
+                message: message,
+                postedAt: postedAt,
+                postedDate: localDateKey(postedAt),
+                dueAt: dueAt,
+                expiresAt: dueAt,
+              ),
+            );
+          }
+        }
+      }
+    } catch (_) {
+      // Upcoming events endpoint is optional; activity stream results remain valid.
     }
 
     final result = itemsById.values.toList()

@@ -254,7 +254,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Automatically clears previous days\' Canvas cache daily so storage stays light and yesterday\'s posts are never re-notified. Saved schedules & history stay protected.',
+                        'Automatically deletes temporary Canvas activity notifications once their deadline is up. Announcements are never stored in SQLite; saved schedules & history stay protected.',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -262,7 +262,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       const SizedBox(height: 6),
                       Text(
                         vm.lastDailyCleanupDate != null
-                            ? 'Last daily cleanup: ${vm.lastDailyCleanupDate} (${vm.lastDailyCleanupRemoved} cleared today · ${vm.todayCanvasItems.length} cached for today)'
+                            ? 'Last cleanup: ${vm.lastDailyCleanupDate} (${vm.lastDailyCleanupRemoved} expired cleared · ${vm.canvasActivities.length} active activities in SQLite)'
                             : 'Scheduled automatically each day',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: theme.colorScheme.primary,
@@ -291,28 +291,56 @@ class _SettingsPageState extends State<SettingsPage> {
                     final cvm = widget.canvasViewModel!;
                     final isSignedIn =
                         widget.authViewModel?.isAuthenticated ?? true;
-                    return Card(
-                      child: ListTile(
-                        key: const Key('open_canvas_settings_tile'),
-                        leading: Icon(
-                          Icons.school_outlined,
-                          color: theme.colorScheme.primary,
+                    return Column(
+                      children: <Widget>[
+                        Card(
+                          child: ListTile(
+                            key: const Key('open_canvas_hub_tile'),
+                            leading: Icon(
+                              Icons.campaign_outlined,
+                              color: theme.colorScheme.primary,
+                            ),
+                            title: const Text(
+                              'Canvas Hub',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            subtitle: Text(
+                              isSignedIn
+                                  ? 'General, Announcements, Activities & Reminders'
+                                  : 'Sign in required · Announcements & Activities',
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () {
+                              Navigator.of(context)
+                                  .pushNamed(AppRoutes.canvasHub);
+                            },
+                          ),
                         ),
-                        title: const Text(
-                          'Canvas Settings',
-                          style: TextStyle(fontWeight: FontWeight.w700),
+                        const SizedBox(height: 8),
+                        Card(
+                          child: ListTile(
+                            key: const Key('open_canvas_settings_tile'),
+                            leading: Icon(
+                              Icons.school_outlined,
+                              color: theme.colorScheme.primary,
+                            ),
+                            title: const Text(
+                              'Canvas Settings',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            subtitle: Text(
+                              isSignedIn
+                                  ? '${cvm.displayedStatus.label} · ${cvm.baseUrl}'
+                                  : 'Sign in required · ${cvm.baseUrl}',
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () {
+                              Navigator.of(context)
+                                  .pushNamed(AppRoutes.canvasSettings);
+                            },
+                          ),
                         ),
-                        subtitle: Text(
-                          isSignedIn
-                              ? '${cvm.displayedStatus.label} · ${cvm.baseUrl}'
-                              : 'Sign in required · ${cvm.baseUrl}',
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () {
-                          Navigator.of(context)
-                              .pushNamed(AppRoutes.canvasSettings);
-                        },
-                      ),
+                      ],
                     );
                   },
                 ),

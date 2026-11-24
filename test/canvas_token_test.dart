@@ -6,11 +6,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:seireminds/data/repositories/canvas_token_repository.dart';
+import 'package:seireminds/data/repositories/schedule_repository.dart';
+import 'package:seireminds/data/services/alarm_service.dart';
 import 'package:seireminds/data/services/canvas_api_client.dart';
 import 'package:seireminds/data/services/canvas_secure_storage.dart';
+import 'package:seireminds/data/services/sqlite_database_service.dart';
 import 'package:seireminds/domain/models/canvas_token_models.dart';
+import 'package:seireminds/domain/models/schedule_models.dart';
 import 'package:seireminds/ui/features/canvas/view_models/canvas_settings_view_model.dart';
+import 'package:seireminds/ui/features/canvas/views/canvas_hub_page.dart';
 import 'package:seireminds/ui/features/canvas/views/canvas_settings_page.dart';
+import 'package:seireminds/ui/features/schedule/view_models/schedule_view_model.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _InMemorySecureStore implements SecureKeyValueStore {
   final Map<String, String> data = <String, String>{};
@@ -682,5 +689,176 @@ void main() {
         expect(store.data.containsKey('seireminds_canvas_token_slot_b'), isFalse);
       },
     );
+
+    testWidgets(
+      'CanvasHubPage separates General, Announcements, Activities, and Reminders tabs cleanly',
+      (WidgetTester tester) async {
+        sqfliteFfiInit();
+        final nowLocal = DateTime(2026, 11, 23, 14, 0);
+        final todayIso =
+            DateTime(2026, 11, 23, 10, 0).toUtc().toIso8601String();
+        final futureDueIso =
+            DateTime(2026, 11, 26, 15, 0).toUtc().toIso8601String();
+
+        final store = _InMemorySecureStore();
+        final mockClient = MockClient((http.Request req) async {
+          if (req.url.path == '/api/v1/users/self/profile') {
+            return http.Response(
+              jsonEncode(<String, Object>{'id': 1, 'name': 'Student'}),
+              200,
+            );
+          }
+          if (req.url.path == '/api/v1/courses') {
+            return http.Response(
+              jsonEncode(<Map<String, Object>>[
+                <String, Object>{'id': 10, 'name': 'Data Structures'},
+              ]),
+              200,
+            );
+          }
+          if (req.url.path == '/api/v1/users/self/tokens') {
+            return http.Response('Forbidden', 403);
+          }
+          if (req.url.path == '/api/v1/announcements') {
+            return http.Response(
+              jsonEncode(<Map<String, Object>>[
+                <String, Object>{
+                  'id': 101,
+                  'title': 'Exam Room Notice',
+                  'message': '<p>Room 204</p>',
+                  'posted_at': todayIso,
+                  'context_code': 'course_10',
+                },
+              ]),
+              200,
+            );
+          }
+          if (req.url.path == '/api/v1/users/self/activity_stream') {
+            return http.Response('[]', 200);
+          }
+          if (req.url.path == '/api/v1/users/self/upcoming_events') {
+            return http.Response(
+              jsonEncode(<Map<String, Object>>[
+                <String, Object>{
+                  'id': 'ev_7',
+                  'title': 'Lab 5 Project',
+                  'context_code': 'course_10',
+                  'assignment': <String, Object>{
+                    'id': 77,
+                    'name': 'Lab 5 Project',
+                    'due_at': futureDueIso,
+                    'created_at': todayIso,
+                  },
+                },
+              ]),
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        });
+
+        final canvasRepo = CanvasTokenRepository(
+          store: store,
+          apiClient: CanvasApiClient(httpClient: mockClient),
+          clock: () => nowLocal,
+        );
+        await canvasRepo.saveOrReplaceToken(
+          baseUrl: kDefaultCanvasBaseUrl,
+          candidateToken: '1001~ValidTokenForHub9999',
+          isReplacement: false,
+        );
+
+        final scheduleRepo = ScheduleRepository(
+          database: SqliteScheduleDatabase(
+            databaseFactory: databaseFactoryFfiNoIsolate,
+            databasePath: inMemoryDatabasePath,
+          ),
+          alarmService: _TestHubAlarmService(),
+          clock: () => nowLocal,
+        );
+        final scheduleVm = ScheduleViewModel(
+          repository: scheduleRepo,
+          clock: () => nowLocal,
+        );
+        final canvasVm = CanvasSettingsViewModel(
+          repository: canvasRepo,
+          clock: () => nowLocal,
+          onSyncTodayUpdates: () =>
+              scheduleVm.syncTodayCanvasUpdates(canvasRepo),
+        );
+        await scheduleVm.initialize();
+        await canvasVm.load();
+        addTearDown(() async {
+          scheduleVm.dispose();
+          canvasVm.dispose();
+          await scheduleRepo.close();
+        });
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: CanvasHubPage(
+              scheduleViewModel: scheduleVm,
+              canvasViewModel: canvasVm,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Sync feed -> populates General (2), Announcements (1), Activities (1), Reminders (1).
+        await tester.tap(find.byKey(const Key('canvas_hub_refresh_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('General (2)'), findsOneWidget);
+        expect(find.text('Announcements (1)'), findsOneWidget);
+        expect(find.text('Activities (1)'), findsOneWidget);
+        expect(find.text('Reminders (1)'), findsOneWidget);
+        expect(find.text('Exam Room Notice'), findsOneWidget);
+        expect(find.text('Lab 5 Project'), findsOneWidget);
+
+        // Switch to Announcements tab -> ONLY announcements shown.
+        await tester.tap(find.byKey(const Key('canvas_tab_announcements')));
+        await tester.pumpAndSettle();
+        expect(find.text('Exam Room Notice'), findsOneWidget);
+        expect(find.text('Lab 5 Project'), findsNothing);
+
+        // Switch to Activities tab -> ONLY activities stored temporarily until deadline shown.
+        await tester.tap(find.byKey(const Key('canvas_tab_activities')));
+        await tester.pumpAndSettle();
+        expect(find.text('Lab 5 Project'), findsOneWidget);
+        expect(find.text('Exam Room Notice'), findsNothing);
+
+        // Switch to Reminders tab -> deadline reminder shown.
+        await tester.tap(find.byKey(const Key('canvas_tab_reminders')));
+        await tester.pumpAndSettle();
+        expect(find.text('Lab 5 Project'), findsOneWidget);
+        expect(find.text('Reminder'), findsOneWidget);
+      },
+    );
   });
+}
+
+class _TestHubAlarmService implements AlarmService {
+  @override
+  Future<AlarmPermissionStatus> getPermissionStatus() async =>
+      const AlarmPermissionStatus.unsupported();
+  @override
+  Future<void> openBatteryOptimizationSettings() async {}
+  @override
+  Future<void> openDndSettings() async {}
+  @override
+  Future<void> openExactAlarmSettings() async {}
+  @override
+  Future<bool> requestNotificationPermission() async => true;
+  @override
+  Future<void> showCanvasNotification({
+    required int id,
+    required String title,
+    required String body,
+  }) async {}
+  @override
+  Future<void> stopActiveAlarm() async {}
+  @override
+  Future<void> syncAlarms(List<ScheduledAlarmPayload> alarms) async {}
+  @override
+  Future<void> triggerTestAlarm() async {}
 }

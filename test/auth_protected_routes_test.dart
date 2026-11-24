@@ -187,6 +187,13 @@ void main() {
       );
       expect(
         AppRoutes.resolveAuthorizedRoute(
+          AppRoutes.canvasHub,
+          isAuthenticated: false,
+        ),
+        AppRoutes.login,
+      );
+      expect(
+        AppRoutes.resolveAuthorizedRoute(
           AppRoutes.canvasSettings,
           isAuthenticated: false,
         ),

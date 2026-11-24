@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../../domain/models/canvas_token_models.dart';
 import '../../../../domain/models/schedule_models.dart';
 import '../../../core/app_routes.dart';
 import '../../../core/app_theme.dart';
@@ -186,6 +185,10 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
     Navigator.of(context).pushNamed(AppRoutes.settings);
   }
 
+  void _openCanvasHub() {
+    Navigator.of(context).pushNamed(AppRoutes.canvasHub);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -199,11 +202,6 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
       listenable: Listenable.merge(listenables),
       builder: (context, _) {
         final vm = widget.viewModel;
-        final cvm = widget.canvasViewModel;
-        final isSignedIn = widget.authViewModel?.isAuthenticated ?? true;
-        final showCanvasCard =
-            (isSignedIn && (cvm?.isConnected ?? false)) ||
-            vm.todayCanvasItems.isNotEmpty;
         final dayEvents = vm.selectedDayEvents;
         final daySubjects = vm.selectedDaySubjects;
         final nextUp = vm.nextUpcomingSession;
@@ -229,7 +227,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    'v1.1-beta.1',
+                    'v1.1-beta.2',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: theme.colorScheme.onPrimaryContainer,
                       fontWeight: FontWeight.w700,
@@ -239,6 +237,17 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
               ],
             ),
             actions: <Widget>[
+              if (widget.canvasViewModel != null)
+                IconButton(
+                  key: const Key('open_canvas_hub_button'),
+                  tooltip: 'Canvas Hub (Announcements, Activities & Reminders)',
+                  onPressed: _openCanvasHub,
+                  icon: Badge(
+                    isLabelVisible: vm.canvasActivities.isNotEmpty,
+                    label: Text('${vm.canvasActivities.length}'),
+                    child: const Icon(Icons.school_outlined),
+                  ),
+                ),
               IconButton(
                 key: const Key('alarm_setup_button'),
                 tooltip: 'Alarm & Silent-Bypass Setup',
@@ -326,9 +335,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                 ),
                               ),
                             )
-                          : (daySubjects.isEmpty &&
-                                  dayEvents.isEmpty &&
-                                  !showCanvasCard)
+                          : (daySubjects.isEmpty && dayEvents.isEmpty)
                           ? _EmptyDayView(
                               weekday: vm.selectedWeekday,
                               onAddPressed: () => _openClassForm(),
@@ -344,28 +351,6 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                       isInProgress: nextUp.isInProgress,
                                       minutesUntilStart:
                                           nextUp.minutesUntilStart,
-                                    ),
-                                  ),
-                                if (showCanvasCard)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
-                                    child: _TodayCanvasUpdatesCard(
-                                      items: vm.todayCanvasItems,
-                                      isSyncing: vm.isSyncingCanvas,
-                                      statusMessage: vm.canvasSyncMessage,
-                                      onRefresh: (isSignedIn &&
-                                              cvm != null &&
-                                              cvm.canSyncTodayUpdates)
-                                          ? cvm.syncTodayUpdates
-                                          : null,
-                                    ),
-                                  ),
-                                if (daySubjects.isEmpty && dayEvents.isEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 12),
-                                    child: _EmptyDayView(
-                                      weekday: vm.selectedWeekday,
-                                      onAddPressed: () => _openClassForm(),
                                     ),
                                   ),
                                 ...dayEvents.map((event) {
@@ -1261,168 +1246,6 @@ class _NextClassSummaryCard extends StatelessWidget {
                 ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TodayCanvasUpdatesCard extends StatelessWidget {
-  const _TodayCanvasUpdatesCard({
-    required this.items,
-    required this.isSyncing,
-    this.statusMessage,
-    this.onRefresh,
-  });
-
-  final List<CanvasDailyItem> items;
-  final bool isSyncing;
-  final String? statusMessage;
-  final Future<void> Function()? onRefresh;
-
-  String _formatTime(DateTime utc) {
-    final local = utc.toLocal();
-    final hh = local.hour % 12 == 0 ? 12 : local.hour % 12;
-    final mm = local.minute.toString().padLeft(2, '0');
-    final period = local.hour >= 12 ? 'PM' : 'AM';
-    return '$hh:$mm $period';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Card(
-      key: const Key('today_canvas_updates_card'),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(Icons.school_outlined, color: cs.primary, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Today\'s Canvas Updates (${items.length})',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                if (onRefresh != null)
-                  IconButton(
-                    key: const Key('sync_today_canvas_button'),
-                    tooltip: 'Refresh today\'s Canvas announcements & activities',
-                    onPressed: isSyncing ? null : () => onRefresh!(),
-                    icon: isSyncing
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh, size: 20),
-                  ),
-              ],
-            ),
-            Text(
-              'Only announcements & activities posted today are shown. Previous days clear daily.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-            if (statusMessage != null && items.isEmpty) ...<Widget>[
-              const SizedBox(height: 6),
-              Text(
-                statusMessage!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: cs.primary,
-                ),
-              ),
-            ],
-            if (items.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 10),
-              ...items.map(
-                (item) => Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: item.kind ==
-                                      CanvasDailyItemKind.announcement
-                                  ? cs.tertiaryContainer
-                                  : cs.secondaryContainer,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              item.kind.label,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: item.kind ==
-                                        CanvasDailyItemKind.announcement
-                                    ? cs.onTertiaryContainer
-                                    : cs.onSecondaryContainer,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              item.courseName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: cs.onSurfaceVariant,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            _formatTime(item.postedAt),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: cs.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        item.title,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (item.message.isNotEmpty) ...<Widget>[
-                        const SizedBox(height: 2),
-                        Text(
-                          item.message,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ],
           ],
         ),
       ),

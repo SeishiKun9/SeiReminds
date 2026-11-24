@@ -9,7 +9,7 @@ class ScheduleDataSnapshot {
     required this.events,
     required this.activeHistory,
     required this.archivedHistory,
-    this.todayCanvasItems = const <CanvasDailyItem>[],
+    this.activeCanvasActivities = const <CanvasDailyItem>[],
     this.lastDailyCleanupDate,
     this.lastDailyCleanupRemoved = 0,
     this.alarmSyncWarning,
@@ -19,7 +19,7 @@ class ScheduleDataSnapshot {
   final List<EventSchedule> events;
   final List<HistoryEntry> activeHistory;
   final List<HistoryEntry> archivedHistory;
-  final List<CanvasDailyItem> todayCanvasItems;
+  final List<CanvasDailyItem> activeCanvasActivities;
   final String? lastDailyCleanupDate;
   final int lastDailyCleanupRemoved;
   final String? alarmSyncWarning;
@@ -38,6 +38,10 @@ class ScheduleRepository {
   final AlarmService _alarmService;
   final DateTime Function() _clock;
 
+  // In-memory only: announcements are NEVER stored in SQLite.
+  String? _sessionAnnouncementDateKey;
+  final Set<String> _notifiedSessionAnnouncementIds = <String>{};
+
   Future<ScheduleDataSnapshot> loadAllAndSync({bool skipCleanup = false}) async {
     final now = _clock();
     if (!skipCleanup) {
@@ -47,7 +51,8 @@ class ScheduleRepository {
     final events = await _database.loadEvents();
     final activeHistory = await _database.loadHistory(archivedOnly: false);
     final archivedHistory = await _database.loadHistory(archivedOnly: true);
-    final todayCanvasItems = await _database.loadTodayCanvasItems(now: now);
+    final activeCanvasActivities =
+        await _database.loadActiveCanvasActivities(now: now);
     final cleanupMeta = await _database.getDailyCleanupMeta();
     final warning = await _syncAlarmsSafely(schedules, events);
     return ScheduleDataSnapshot(
@@ -55,7 +60,8 @@ class ScheduleRepository {
       events: List<EventSchedule>.unmodifiable(events),
       activeHistory: List<HistoryEntry>.unmodifiable(activeHistory),
       archivedHistory: List<HistoryEntry>.unmodifiable(archivedHistory),
-      todayCanvasItems: List<CanvasDailyItem>.unmodifiable(todayCanvasItems),
+      activeCanvasActivities:
+          List<CanvasDailyItem>.unmodifiable(activeCanvasActivities),
       lastDailyCleanupDate: cleanupMeta.lastDate,
       lastDailyCleanupRemoved: cleanupMeta.lastRemovedCount,
       alarmSyncWarning: warning,
@@ -69,56 +75,98 @@ class ScheduleRepository {
     return (snapshot: snapshot, cleanup: cleanup);
   }
 
-  /// Stores ONLY today's Canvas announcements/activities, clears yesterday's cache,
-  /// and notifies each newly posted today item once (never re-notifies).
+  /// Syncs the Canvas Hub feed:
+  /// - ONLY unexpired Canvas activities are stored temporarily in SQLite until their deadline is up.
+  /// - Today's Canvas announcements stay in memory only (NEVER stored in SQLite) and yesterday's are ignored.
   Future<CanvasTodaySyncResult> syncTodayCanvasItems(
     List<CanvasDailyItem> fetched,
   ) async {
     final now = _clock();
-    final synced = await _database.syncTodayCanvasItems(fetched, now: now);
-    final notifiedIds = <String>[];
+    final todayKey = localDateKey(now);
+    if (_sessionAnnouncementDateKey != todayKey) {
+      _sessionAnnouncementDateKey = todayKey;
+      _notifiedSessionAnnouncementIds.clear();
+    }
+
+    final todayAnnouncements = fetched
+        .where(
+          (item) =>
+              item.kind == CanvasDailyItemKind.announcement &&
+              isPostedOnCurrentDay(item.postedAt, now: now),
+        )
+        .toList()
+      ..sort((a, b) => b.postedAt.compareTo(a.postedAt));
+
+    final incomingActivities = fetched
+        .where((item) => item.kind == CanvasDailyItemKind.activity)
+        .toList();
+
+    final synced =
+        await _database.syncCanvasActivities(incomingActivities, now: now);
+    final notifiedActivityIds = <String>[];
+    var totalNewlyNotified = 0;
 
     for (final item in synced.newlyUnnotified) {
-      final notifTitle = '${item.kind.label} · ${item.courseName}';
+      final notifTitle = 'Activity · ${item.courseName}';
       final notifBody = item.message.isNotEmpty
           ? '${item.title}: ${item.message}'
           : item.title;
       try {
         await _alarmService.showCanvasNotification(
-          id: stableCanvasNotificationId(item.id, item.postedDate),
+          id: stableCanvasNotificationId(item.id, todayKey),
           title: notifTitle,
           body: notifBody,
         );
-        notifiedIds.add(item.id);
-      } catch (_) {
-        // Leave unnotified so a retry can deliver if notification channel failed transiently.
-      }
+        notifiedActivityIds.add(item.id);
+        totalNewlyNotified++;
+      } catch (_) {}
     }
 
-    if (notifiedIds.isNotEmpty) {
-      await _database.markCanvasItemsNotified(
-        notifiedIds,
-        postedDate: synced.cleanup.dateKey,
-      );
+    if (notifiedActivityIds.isNotEmpty) {
+      await _database.markCanvasActivitiesNotified(notifiedActivityIds);
     }
 
-    final latestToday = await _database.loadTodayCanvasItems(now: now);
-    final msg = latestToday.isEmpty
-        ? 'No Canvas announcements or activities posted today.'
-        : notifiedIds.isEmpty
-            ? '${latestToday.length} update(s) from today loaded (already notified).'
-            : 'Synced ${latestToday.length} update(s) from today (${notifiedIds.length} new notification${notifiedIds.length == 1 ? '' : 's'}).';
+    // Notify brand-new today announcements in-memory only (NEVER written to SQLite).
+    for (final item in todayAnnouncements) {
+      if (_notifiedSessionAnnouncementIds.contains(item.id)) continue;
+      final notifTitle = 'Announcement · ${item.courseName}';
+      final notifBody = item.message.isNotEmpty
+          ? '${item.title}: ${item.message}'
+          : item.title;
+      try {
+        await _alarmService.showCanvasNotification(
+          id: stableCanvasNotificationId(item.id, todayKey),
+          title: notifTitle,
+          body: notifBody,
+        );
+        _notifiedSessionAnnouncementIds.add(item.id);
+        totalNewlyNotified++;
+      } catch (_) {}
+    }
+
+    final latestActivities =
+        await _database.loadActiveCanvasActivities(now: now);
+    final totalCount = todayAnnouncements.length + latestActivities.length;
+    final msg = totalCount == 0
+        ? 'No current announcements or active activities on Canvas.'
+        : totalNewlyNotified == 0
+            ? '${todayAnnouncements.length} announcement(s) today · ${latestActivities.length} active activity item(s).'
+            : 'Synced ${todayAnnouncements.length} announcement(s) and ${latestActivities.length} active activity item(s) ($totalNewlyNotified new notification${totalNewlyNotified == 1 ? '' : 's'}).';
 
     return CanvasTodaySyncResult(
       succeeded: true,
       message: msg,
-      todayItems: List<CanvasDailyItem>.unmodifiable(latestToday),
-      newlyNotifiedCount: notifiedIds.length,
+      todayAnnouncements: List<CanvasDailyItem>.unmodifiable(todayAnnouncements),
+      activeActivities: List<CanvasDailyItem>.unmodifiable(latestActivities),
+      newlyNotifiedCount: totalNewlyNotified,
       clearedStaleCount: synced.cleanup.clearedItemsCount,
     );
   }
 
-  Future<void> clearCanvasDailyCache() => _database.clearCanvasDailyCache();
+  Future<void> clearCanvasDailyCache() async {
+    _notifiedSessionAnnouncementIds.clear();
+    await _database.clearCanvasDailyCache();
+  }
 
   Future<ScheduleDataSnapshot> saveSchedule(
     SubjectSchedule schedule, {

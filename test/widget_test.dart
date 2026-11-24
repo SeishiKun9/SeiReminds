@@ -85,7 +85,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('SeiReminds'), findsOneWidget);
-      expect(find.text('v1.1-beta.1'), findsOneWidget);
+      expect(find.text('v1.1-beta.2'), findsOneWidget);
       expect(find.text('Beta · Offline'), findsNothing);
       for (final day in kSchoolWeekdays) {
         expect(find.byKey(Key('weekday_tab_$day')), findsOneWidget);
@@ -275,17 +275,24 @@ void main() {
         200,
         scrollable: settingsScrollable,
       );
+      await tester.drag(settingsScrollable, const Offset(0, -160));
+      await tester.pumpAndSettle();
 
       expect(find.text('Visible (2)'), findsOneWidget);
       expect(find.text('Preserved (0)'), findsOneWidget);
 
+      await tester.ensureVisible(softClearBtn);
       await tester.tap(softClearBtn);
       await tester.pumpAndSettle();
 
       expect(find.text('Visible (0)'), findsOneWidget);
       expect(find.text('Preserved (2)'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('permanent_clear_history_button')));
+      final permClearBtn = find.byKey(
+        const Key('permanent_clear_history_button'),
+      );
+      await tester.ensureVisible(permClearBtn);
+      await tester.tap(permClearBtn);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('confirm_permanent_clear_button')));
       await tester.pumpAndSettle();

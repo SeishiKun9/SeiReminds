@@ -7,6 +7,7 @@ class AppRoutes {
   static const String login = '/login';
   static const String signUp = '/signup';
   static const String settings = '/settings';
+  static const String canvasHub = '/canvas';
   static const String canvasSettings = '/settings/canvas';
 
   static const Set<String> authRoutes = <String>{login, signUp};
@@ -20,7 +21,10 @@ class AppRoutes {
     signUp,
   };
 
-  static const Set<String> protectedRoutes = <String>{canvasSettings};
+  static const Set<String> protectedRoutes = <String>{
+    canvasHub,
+    canvasSettings,
+  };
 
   static bool isPublic(String routeName) => publicRoutes.contains(routeName);
 
