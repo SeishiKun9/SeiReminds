@@ -16,6 +16,7 @@ class SqliteScheduleDatabase {
   static const int _dbVersion = 4;
   static const String _metaLastCleanupDate = 'last_daily_cleanup_date';
   static const String _metaLastCleanupRemoved = 'last_daily_cleanup_removed';
+  static const String _metaHistoryViewEnabled = 'history_view_enabled';
 
   final DatabaseFactory? _databaseFactory;
   final String? _databasePath;
@@ -724,6 +725,22 @@ class SqliteScheduleDatabase {
       }
     }
     return (lastDate: lastDate, lastRemovedCount: lastRemoved);
+  }
+
+  Future<bool> getHistoryViewEnabled() async {
+    final db = await _open();
+    final rows = await db.query(
+      'app_meta',
+      where: 'key = ?',
+      whereArgs: const <Object>[_metaHistoryViewEnabled],
+    );
+    if (rows.isEmpty) return true;
+    return (rows.first['value'] as String) != '0';
+  }
+
+  Future<void> setHistoryViewEnabled(bool enabled) async {
+    final db = await _open();
+    await _writeMeta(db, _metaHistoryViewEnabled, enabled ? '1' : '0');
   }
 
   Future<void> clearCanvasDailyCache() async {

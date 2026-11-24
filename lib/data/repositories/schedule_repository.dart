@@ -10,6 +10,7 @@ class ScheduleDataSnapshot {
     required this.activeHistory,
     required this.archivedHistory,
     this.activeCanvasActivities = const <CanvasDailyItem>[],
+    this.historyViewEnabled = true,
     this.lastDailyCleanupDate,
     this.lastDailyCleanupRemoved = 0,
     this.alarmSyncWarning,
@@ -20,6 +21,7 @@ class ScheduleDataSnapshot {
   final List<HistoryEntry> activeHistory;
   final List<HistoryEntry> archivedHistory;
   final List<CanvasDailyItem> activeCanvasActivities;
+  final bool historyViewEnabled;
   final String? lastDailyCleanupDate;
   final int lastDailyCleanupRemoved;
   final String? alarmSyncWarning;
@@ -53,6 +55,7 @@ class ScheduleRepository {
     final archivedHistory = await _database.loadHistory(archivedOnly: true);
     final activeCanvasActivities =
         await _database.loadActiveCanvasActivities(now: now);
+    final historyViewEnabled = await _database.getHistoryViewEnabled();
     final cleanupMeta = await _database.getDailyCleanupMeta();
     final warning = await _syncAlarmsSafely(schedules, events);
     return ScheduleDataSnapshot(
@@ -62,10 +65,16 @@ class ScheduleRepository {
       archivedHistory: List<HistoryEntry>.unmodifiable(archivedHistory),
       activeCanvasActivities:
           List<CanvasDailyItem>.unmodifiable(activeCanvasActivities),
+      historyViewEnabled: historyViewEnabled,
       lastDailyCleanupDate: cleanupMeta.lastDate,
       lastDailyCleanupRemoved: cleanupMeta.lastRemovedCount,
       alarmSyncWarning: warning,
     );
+  }
+
+  Future<ScheduleDataSnapshot> setHistoryViewEnabled(bool enabled) async {
+    await _database.setHistoryViewEnabled(enabled);
+    return loadAllAndSync(skipCleanup: true);
   }
 
   Future<({ScheduleDataSnapshot snapshot, DailyCleanupResult cleanup})>

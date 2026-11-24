@@ -821,6 +821,20 @@ void main() {
           expect(afterDeadline.activeCanvasActivities, isEmpty);
           expect(afterDeadline.lastDailyCleanupRemoved, 1);
           expect(afterDeadline.schedules.length, 1);
+
+          // History view toggle persists in SQLite without deleting history or schedules.
+          expect(afterDeadline.historyViewEnabled, isTrue);
+          final hiddenSnap = await repo.setHistoryViewEnabled(false);
+          expect(hiddenSnap.historyViewEnabled, isFalse);
+          expect(hiddenSnap.activeHistory.length, 1);
+          expect(hiddenSnap.schedules.length, 1);
+
+          final reloadedSnap = await repo.loadAllAndSync();
+          expect(reloadedSnap.historyViewEnabled, isFalse);
+          expect(reloadedSnap.activeHistory.length, 1);
+
+          final restoredSnap = await repo.setHistoryViewEnabled(true);
+          expect(restoredSnap.historyViewEnabled, isTrue);
         } finally {
           await repo.close();
         }

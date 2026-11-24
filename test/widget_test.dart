@@ -85,7 +85,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('SeiReminds'), findsOneWidget);
-      expect(find.text('v1.1-beta.2'), findsOneWidget);
+      expect(find.text('v1.1-beta.3'), findsOneWidget);
       expect(find.text('Beta · Offline'), findsNothing);
       for (final day in kSchoolWeekdays) {
         expect(find.byKey(Key('weekday_tab_$day')), findsOneWidget);
@@ -260,6 +260,9 @@ void main() {
       // 3. Open Settings -> History: verify daily cleanup card, soft clear preserves & permanent clear keeps schedules.
       await tester.tap(find.byKey(const Key('settings_button')));
       await tester.pumpAndSettle();
+      // Let the previous SnackBar dismiss so it cannot obscure lower Settings tiles.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('daily_cleanup_card')), findsOneWidget);
 
@@ -269,6 +272,27 @@ void main() {
             matching: find.byType(Scrollable),
           )
           .first;
+      final historyToggle = find.byKey(const Key('toggle_history_view_switch'));
+      await tester.scrollUntilVisible(
+        historyToggle,
+        200,
+        scrollable: settingsScrollable,
+      );
+      await tester.drag(settingsScrollable, const Offset(0, -160));
+      await tester.pumpAndSettle();
+
+      // Toggle viewing history OFF -> history list and buttons hide without deleting records.
+      await tester.ensureVisible(historyToggle);
+      await tester.tap(historyToggle);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('soft_clear_history_button')), findsNothing);
+      expect(find.text('Visible (2)'), findsNothing);
+
+      // Toggle viewing history back ON -> history records reappear intact.
+      await tester.ensureVisible(historyToggle);
+      await tester.tap(historyToggle);
+      await tester.pumpAndSettle();
+
       final softClearBtn = find.byKey(const Key('soft_clear_history_button'));
       await tester.scrollUntilVisible(
         softClearBtn,

@@ -372,117 +372,142 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 18),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    'History',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+              const SizedBox(height: 16),
+              Card(
+                child: SwitchListTile(
+                  key: const Key('toggle_history_view_switch'),
+                  secondary: Icon(
+                    vm.historyViewEnabled
+                        ? Icons.history
+                        : Icons.visibility_off_outlined,
+                    color: theme.colorScheme.primary,
                   ),
-                  const SizedBox(height: 8),
-                  SegmentedButton<bool>(
-                    segments: <ButtonSegment<bool>>[
-                      ButtonSegment<bool>(
-                        value: false,
-                        label: Text('Visible (${active.length})'),
-                      ),
-                      ButtonSegment<bool>(
-                        value: true,
-                        label: Text('Preserved (${archived.length})'),
-                      ),
-                    ],
-                    selected: <bool>{_showArchived},
-                    onSelectionChanged: (selection) {
-                      setState(() => _showArchived = selection.first);
-                    },
+                  title: const Text(
+                    'Show History',
+                    style: TextStyle(fontWeight: FontWeight.w700),
                   ),
-                ],
+                  subtitle: Text(
+                    vm.historyViewEnabled
+                        ? 'Viewing history is ON. Turn off to hide logs without deleting any data.'
+                        : 'Viewing history is OFF. Your history logs stay safely stored in SQLite.',
+                  ),
+                  value: vm.historyViewEnabled,
+                  onChanged: vm.setHistoryViewEnabled,
+                ),
               ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  FilledButton.tonalIcon(
-                    key: const Key('soft_clear_history_button'),
-                    onPressed: active.isEmpty ? null : _handleSoftClear,
-                    icon: const Icon(Icons.cleaning_services_outlined),
-                    label: const Text('Clear History'),
-                  ),
-                  if (archived.isNotEmpty)
+              if (vm.historyViewEnabled) ...<Widget>[
+                const SizedBox(height: 16),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text(
+                      'History',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SegmentedButton<bool>(
+                      segments: <ButtonSegment<bool>>[
+                        ButtonSegment<bool>(
+                          value: false,
+                          label: Text('Visible (${active.length})'),
+                        ),
+                        ButtonSegment<bool>(
+                          value: true,
+                          label: Text('Preserved (${archived.length})'),
+                        ),
+                      ],
+                      selected: <bool>{_showArchived},
+                      onSelectionChanged: (selection) {
+                        setState(() => _showArchived = selection.first);
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    FilledButton.tonalIcon(
+                      key: const Key('soft_clear_history_button'),
+                      onPressed: active.isEmpty ? null : _handleSoftClear,
+                      icon: const Icon(Icons.cleaning_services_outlined),
+                      label: const Text('Clear History'),
+                    ),
+                    if (archived.isNotEmpty)
+                      OutlinedButton.icon(
+                        key: const Key('restore_history_button'),
+                        onPressed: _handleRestore,
+                        icon: const Icon(Icons.restore),
+                        label: const Text('Restore Preserved'),
+                      ),
                     OutlinedButton.icon(
-                      key: const Key('restore_history_button'),
-                      onPressed: _handleRestore,
-                      icon: const Icon(Icons.restore),
-                      label: const Text('Restore Preserved'),
-                    ),
-                  OutlinedButton.icon(
-                    key: const Key('permanent_clear_history_button'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: theme.colorScheme.error,
-                    ),
-                    onPressed:
-                        totalHistoryCount == 0 ? null : _handlePermanentClear,
-                    icon: const Icon(Icons.delete_forever_outlined),
-                    label: const Text('Clear Permanently'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              if (visibleList.isEmpty)
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      _showArchived
-                          ? 'No preserved (soft-cleared) history entries.'
-                          : archived.isNotEmpty
-                              ? 'History view is clear. ${archived.length} record(s) are still preserved in SQLite under "Preserved".'
-                              : 'No history recorded yet.',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                      key: const Key('permanent_clear_history_button'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: theme.colorScheme.error,
                       ),
+                      onPressed:
+                          totalHistoryCount == 0 ? null : _handlePermanentClear,
+                      icon: const Icon(Icons.delete_forever_outlined),
+                      label: const Text('Clear Permanently'),
                     ),
-                  ),
-                )
-              else
-                ...visibleList.map(
-                  (entry) => Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: entry.isArchived
-                            ? theme.colorScheme.surfaceContainerHighest
-                            : theme.colorScheme.primaryContainer,
-                        child: Icon(
-                          _iconForAction(entry.action),
-                          size: 20,
+                  ],
+                ),
+                const SizedBox(height: 14),
+                if (visibleList.isEmpty)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        _showArchived
+                            ? 'No preserved (soft-cleared) history entries.'
+                            : archived.isNotEmpty
+                                ? 'History view is clear. ${archived.length} record(s) are still preserved in SQLite under "Preserved".'
+                                : 'No history recorded yet.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                      title: Text(
-                        entry.title,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(entry.details),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${_formatTimestamp(entry.createdAt)}${entry.isArchived ? ' · Preserved' : ''}',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
+                    ),
+                  )
+                else
+                  ...visibleList.map(
+                    (entry) => Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: entry.isArchived
+                              ? theme.colorScheme.surfaceContainerHighest
+                              : theme.colorScheme.primaryContainer,
+                          child: Icon(
+                            _iconForAction(entry.action),
+                            size: 20,
                           ),
-                        ],
+                        ),
+                        title: Text(
+                          entry.title,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(entry.details),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${_formatTimestamp(entry.createdAt)}${entry.isArchived ? ' · Preserved' : ''}',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
+              ],
             ],
           ),
         );

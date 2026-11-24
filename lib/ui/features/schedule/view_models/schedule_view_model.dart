@@ -31,6 +31,9 @@ class ScheduleViewModel extends ChangeNotifier {
   List<HistoryEntry> _archivedHistory = const <HistoryEntry>[];
   List<HistoryEntry> get archivedHistory => _archivedHistory;
 
+  bool _historyViewEnabled = true;
+  bool get historyViewEnabled => _historyViewEnabled;
+
   // Stored temporarily in SQLite ONLY until deadline expires.
   List<CanvasDailyItem> _activeCanvasActivities = const <CanvasDailyItem>[];
   List<CanvasDailyItem> get canvasActivities => _activeCanvasActivities;
@@ -146,6 +149,7 @@ class ScheduleViewModel extends ChangeNotifier {
     _events = snapshot.events;
     _activeHistory = snapshot.activeHistory;
     _archivedHistory = snapshot.archivedHistory;
+    _historyViewEnabled = snapshot.historyViewEnabled;
     _activeCanvasActivities = snapshot.activeCanvasActivities;
     _lastDailyCleanupDate = snapshot.lastDailyCleanupDate;
     _lastDailyCleanupRemoved = snapshot.lastDailyCleanupRemoved;
@@ -342,6 +346,17 @@ class ScheduleViewModel extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       _bannerMessage = 'Failed to update event reminder: $e';
+      notifyListeners();
+    }
+  }
+
+  Future<void> setHistoryViewEnabled(bool enabled) async {
+    try {
+      final snapshot = await _repository.setHistoryViewEnabled(enabled);
+      _applySnapshot(snapshot);
+      notifyListeners();
+    } catch (e) {
+      _bannerMessage = 'Could not update history setting: $e';
       notifyListeners();
     }
   }
