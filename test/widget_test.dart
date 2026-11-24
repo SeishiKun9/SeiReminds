@@ -55,6 +55,12 @@ class _RecordingAlarmService implements AlarmService {
   Future<void> openExactAlarmSettings() async {}
 
   @override
+  Future<void> openFullScreenIntentSettings() async {}
+
+  @override
+  Future<void> openAlarmChannelSettings() async {}
+
+  @override
   Future<bool> requestNotificationPermission() async => true;
 }
 
@@ -85,7 +91,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('SeiReminds'), findsOneWidget);
-      expect(find.text('v1.1-beta.3'), findsOneWidget);
+      expect(find.text('v1.1-beta.4'), findsOneWidget);
       expect(find.text('Beta · Offline'), findsNothing);
       for (final day in kSchoolWeekdays) {
         expect(find.byKey(Key('weekday_tab_$day')), findsOneWidget);

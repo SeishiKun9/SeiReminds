@@ -100,10 +100,19 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                 else ...<Widget>[
                   _PermissionTile(
                     title: 'Notifications',
-                    subtitle: 'Shows the lock-screen alarm card & Stop button.',
+                    subtitle:
+                        'Shows the floating heads-up alarm banner & Stop button over your homescreen or any app.',
                     granted: status.notificationsGranted,
                     actionLabel: 'Allow',
                     onAction: widget.viewModel.requestNotificationPermission,
+                  ),
+                  _PermissionTile(
+                    title: 'Pop-Up Alarm Banners',
+                    subtitle:
+                        'Keeps the priority alarm banner pinned over other apps & homescreen without opening SeiReminds.',
+                    granted: status.fullScreenIntentAllowed,
+                    actionLabel: 'Enable',
+                    onAction: widget.viewModel.openFullScreenIntentSettings,
                   ),
                   _PermissionTile(
                     title: 'Exact Class Alarms',
@@ -125,6 +134,23 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                     granted: status.dndAccessGranted,
                     actionLabel: 'Settings',
                     onAction: widget.viewModel.openDndSettings,
+                  ),
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.tune_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      title: const Text('Pop-on-Screen Channel Settings'),
+                      subtitle: const Text(
+                        'If banners still hide on Xiaomi/Samsung/OPPO/Vivo, open this and make sure Floating / Pop on screen is enabled.',
+                      ),
+                      trailing: TextButton(
+                        onPressed: widget.viewModel.openAlarmChannelSettings,
+                        child: const Text('Open'),
+                      ),
+                    ),
                   ),
                 ],
                 const SizedBox(height: 16),

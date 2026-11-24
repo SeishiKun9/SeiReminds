@@ -125,6 +125,24 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
 
+                    "openFullScreenIntentSettings" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                            launchSettingsWithFallback(
+                                Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                                    data = Uri.parse("package:$packageName")
+                                },
+                            )
+                        } else {
+                            openAlarmChannelSettings()
+                        }
+                        result.success(null)
+                    }
+
+                    "openAlarmChannelSettings" -> {
+                        openAlarmChannelSettings()
+                        result.success(null)
+                    }
+
                     "openDndSettings" -> {
                         launchSettingsWithFallback(
                             Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS),
@@ -166,6 +184,33 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun openAlarmChannelSettings() {
+        AlarmPlaybackService.ensureChannels(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                        putExtra(Settings.EXTRA_CHANNEL_ID, AlarmPlaybackService.ACTIVE_CHANNEL_ID)
+                    },
+                )
+                return
+            } catch (_: Exception) {
+            }
+            launchSettingsWithFallback(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                },
+            )
+            return
+        }
+        launchSettingsWithFallback(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+            },
+        )
+    }
+
     private fun launchSettingsWithFallback(intent: Intent) {
         try {
             startActivity(intent)
@@ -199,9 +244,16 @@ class MainActivity : FlutterActivity() {
             true
         }
 
+        val fullScreenIntentAllowed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            nm.canUseFullScreenIntent()
+        } else {
+            true
+        }
+
         return mapOf(
             "notificationsGranted" to notificationsGranted,
             "exactAlarmsAllowed" to exactAlarmsAllowed,
+            "fullScreenIntentAllowed" to fullScreenIntentAllowed,
             "dndAccessGranted" to nm.isNotificationPolicyAccessGranted,
             "ignoringBatteryOptimizations" to pm.isIgnoringBatteryOptimizations(packageName),
         )

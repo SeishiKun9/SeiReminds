@@ -265,6 +265,12 @@ class ScheduleRepository {
   Future<void> openExactAlarmSettings() =>
       _alarmService.openExactAlarmSettings();
 
+  Future<void> openFullScreenIntentSettings() =>
+      _alarmService.openFullScreenIntentSettings();
+
+  Future<void> openAlarmChannelSettings() =>
+      _alarmService.openAlarmChannelSettings();
+
   Future<void> openDndSettings() => _alarmService.openDndSettings();
 
   Future<void> openBatteryOptimizationSettings() =>

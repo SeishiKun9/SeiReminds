@@ -10,18 +10,21 @@ class AlarmPermissionStatus {
     required this.exactAlarmsAllowed,
     required this.dndAccessGranted,
     required this.ignoringBatteryOptimizations,
+    this.fullScreenIntentAllowed = true,
   });
 
   const AlarmPermissionStatus.unsupported()
       : isAndroidSupported = false,
         notificationsGranted = false,
         exactAlarmsAllowed = false,
+        fullScreenIntentAllowed = false,
         dndAccessGranted = false,
         ignoringBatteryOptimizations = false;
 
   final bool isAndroidSupported;
   final bool notificationsGranted;
   final bool exactAlarmsAllowed;
+  final bool fullScreenIntentAllowed;
   final bool dndAccessGranted;
   final bool ignoringBatteryOptimizations;
 
@@ -29,6 +32,7 @@ class AlarmPermissionStatus {
       isAndroidSupported &&
       (!notificationsGranted ||
           !exactAlarmsAllowed ||
+          !fullScreenIntentAllowed ||
           !ignoringBatteryOptimizations);
 }
 
@@ -44,6 +48,8 @@ abstract class AlarmService {
   Future<AlarmPermissionStatus> getPermissionStatus();
   Future<bool> requestNotificationPermission();
   Future<void> openExactAlarmSettings();
+  Future<void> openFullScreenIntentSettings();
+  Future<void> openAlarmChannelSettings();
   Future<void> openDndSettings();
   Future<void> openBatteryOptimizationSettings();
 }
@@ -120,6 +126,7 @@ class MethodChannelAlarmService implements AlarmService {
         isAndroidSupported: true,
         notificationsGranted: result['notificationsGranted'] == true,
         exactAlarmsAllowed: result['exactAlarmsAllowed'] == true,
+        fullScreenIntentAllowed: result['fullScreenIntentAllowed'] != false,
         dndAccessGranted: result['dndAccessGranted'] == true,
         ignoringBatteryOptimizations:
             result['ignoringBatteryOptimizations'] == true,
@@ -142,6 +149,18 @@ class MethodChannelAlarmService implements AlarmService {
   Future<void> openExactAlarmSettings() async {
     if (!_isAndroid) return;
     await _channel.invokeMethod<void>('openExactAlarmSettings');
+  }
+
+  @override
+  Future<void> openFullScreenIntentSettings() async {
+    if (!_isAndroid) return;
+    await _channel.invokeMethod<void>('openFullScreenIntentSettings');
+  }
+
+  @override
+  Future<void> openAlarmChannelSettings() async {
+    if (!_isAndroid) return;
+    await _channel.invokeMethod<void>('openAlarmChannelSettings');
   }
 
   @override

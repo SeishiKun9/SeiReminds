@@ -46,6 +46,12 @@ class _FakeAlarmService implements AlarmService {
   Future<void> openExactAlarmSettings() async {}
 
   @override
+  Future<void> openFullScreenIntentSettings() async {}
+
+  @override
+  Future<void> openAlarmChannelSettings() async {}
+
+  @override
   Future<bool> requestNotificationPermission() async => true;
 
   @override
@@ -840,5 +846,27 @@ void main() {
         }
       },
     );
+
+    test('AlarmPermissionStatus flags missing full-screen pop-up banner access', () {
+      const missingPopUp = AlarmPermissionStatus(
+        isAndroidSupported: true,
+        notificationsGranted: true,
+        exactAlarmsAllowed: true,
+        fullScreenIntentAllowed: false,
+        dndAccessGranted: false,
+        ignoringBatteryOptimizations: true,
+      );
+      expect(missingPopUp.needsAttention, isTrue);
+
+      const ready = AlarmPermissionStatus(
+        isAndroidSupported: true,
+        notificationsGranted: true,
+        exactAlarmsAllowed: true,
+        fullScreenIntentAllowed: true,
+        dndAccessGranted: false,
+        ignoringBatteryOptimizations: true,
+      );
+      expect(ready.needsAttention, isFalse);
+    });
   });
 }

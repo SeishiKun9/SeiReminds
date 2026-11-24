@@ -126,6 +126,12 @@ class _NoopAlarmService implements AlarmService {
   Future<void> openExactAlarmSettings() async {}
 
   @override
+  Future<void> openFullScreenIntentSettings() async {}
+
+  @override
+  Future<void> openAlarmChannelSettings() async {}
+
+  @override
   Future<bool> requestNotificationPermission() async => true;
 
   @override

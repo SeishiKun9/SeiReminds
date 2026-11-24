@@ -848,6 +848,10 @@ class _TestHubAlarmService implements AlarmService {
   @override
   Future<void> openExactAlarmSettings() async {}
   @override
+  Future<void> openFullScreenIntentSettings() async {}
+  @override
+  Future<void> openAlarmChannelSettings() async {}
+  @override
   Future<bool> requestNotificationPermission() async => true;
   @override
   Future<void> showCanvasNotification({

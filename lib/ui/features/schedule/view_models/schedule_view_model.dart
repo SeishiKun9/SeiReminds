@@ -11,10 +11,10 @@ class ScheduleViewModel extends ChangeNotifier {
     required this._repository,
     int? initialWeekday,
     DateTime Function()? clock,
-  })  : _clock = clock ?? DateTime.now,
-        _selectedWeekday = _clampToSchoolDay(
-          initialWeekday ?? (clock ?? DateTime.now)().weekday,
-        );
+  }) : _clock = clock ?? DateTime.now,
+       _selectedWeekday = _clampToSchoolDay(
+         initialWeekday ?? (clock ?? DateTime.now)().weekday,
+       );
 
   final ScheduleRepository _repository;
   final DateTime Function() _clock;
@@ -52,9 +52,7 @@ class ScheduleViewModel extends ChangeNotifier {
 
   List<CanvasDailyItem> get canvasReminders {
     final upcoming = List<CanvasDailyItem>.of(_activeCanvasActivities)
-      ..sort(
-        (a, b) => a.effectiveExpiresAt.compareTo(b.effectiveExpiresAt),
-      );
+      ..sort((a, b) => a.effectiveExpiresAt.compareTo(b.effectiveExpiresAt));
     return upcoming;
   }
 
@@ -101,8 +99,8 @@ class ScheduleViewModel extends ChangeNotifier {
       eventsForWeekday(_events, _selectedWeekday);
 
   ({DaySessionItem item, bool isInProgress, int minutesUntilStart})?
-      get nextUpcomingSession =>
-          findNextUpcomingSession(_schedules, _events, now: _clock());
+  get nextUpcomingSession =>
+      findNextUpcomingSession(_schedules, _events, now: _clock());
 
   int subjectCountForDay(int weekday) =>
       groupedSubjectsForWeekday(_schedules, weekday).length;
@@ -122,14 +120,12 @@ class ScheduleViewModel extends ChangeNotifier {
   List<EventSchedule> conflictingEventsForSessionOnDay(
     int weekday,
     SessionSchedule session,
-  ) =>
-      conflictingEventsForSession(_events, weekday, session);
+  ) => conflictingEventsForSession(_events, weekday, session);
 
   List<DaySessionItem> affectedSessionsForDayEvent(
     EventSchedule event,
     int weekday,
-  ) =>
-      affectedSessionsForEventOnDay(event, _schedules, weekday);
+  ) => affectedSessionsForEventOnDay(event, _schedules, weekday);
 
   List<String> get knownSubjects {
     final names = _schedules.map((s) => s.subject).toSet().toList()
@@ -413,8 +409,13 @@ class ScheduleViewModel extends ChangeNotifier {
     await _repository.resyncAlarms();
   }
 
-  Future<void> openExactAlarmSettings() =>
-      _repository.openExactAlarmSettings();
+  Future<void> openExactAlarmSettings() => _repository.openExactAlarmSettings();
+
+  Future<void> openFullScreenIntentSettings() =>
+      _repository.openFullScreenIntentSettings();
+
+  Future<void> openAlarmChannelSettings() =>
+      _repository.openAlarmChannelSettings();
 
   Future<void> openDndSettings() => _repository.openDndSettings();
 
