@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.media.AudioAttributes
 import android.os.Build
 import android.os.IBinder
@@ -19,10 +20,10 @@ import android.os.VibratorManager
 
 /**
  * Foreground service that drives silent, vibration-only alarms (NO audio)
- * continuously until the user explicitly presses Stop so it never disturbs class.
+ * with a priority heads-up notification whose Stop button cancels vibration
+ * directly via AlarmStopReceiver without opening the app.
  */
 class AlarmPlaybackService : Service() {
-    private var vibrator: Vibrator? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -33,11 +34,13 @@ class AlarmPlaybackService : Service() {
             return START_NOT_STICKY
         }
 
+        val alarmId = intent?.getIntExtra(EXTRA_ALARM_ID, FOREGROUND_NOTIFICATION_ID)
+            ?: FOREGROUND_NOTIFICATION_ID
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "SeiReminds Class"
-        val body = intent?.getStringExtra(EXTRA_BODY) ?: "Your class reminder is active."
+        val body = intent?.getStringExtra(EXTRA_BODY) ?: "Your class is starting soon."
 
         ensureChannels(this)
-        val notification = buildActiveNotification(this, title, body)
+        val notification = buildActiveNotification(this, alarmId, title, body)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 FOREGROUND_NOTIFICATION_ID,
@@ -51,18 +54,18 @@ class AlarmPlaybackService : Service() {
         acquireWakeLock()
         startContinuousVibration()
 
-        // Keep running and vibrating continuously until the user presses Stop.
+        // Keep running and vibrating continuously until the user taps Stop.
         return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
-        stopVibration()
+        cancelActiveVibration(this)
         releaseWakeLock()
         super.onDestroy()
     }
 
     private fun stopAlarmAndService() {
-        stopVibration()
+        cancelActiveVibration(this)
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -88,13 +91,8 @@ class AlarmPlaybackService : Service() {
     }
 
     private fun startContinuousVibration() {
-        val vib = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        }
-        vibrator = vib
+        val vib = resolveVibrator(this)
+        activeVibrator = vib
         if (!vib.hasVibrator()) return
 
         try {
@@ -134,16 +132,8 @@ class AlarmPlaybackService : Service() {
                 vib.vibrate(HARD_VIBRATION_TIMINGS, 0)
             }
         } catch (_: Exception) {
-            // Keep notification with Stop button visible if hardware vibrator rejects waveform.
+            // Keep priority notification with Stop button visible if vibrator rejects waveform.
         }
-    }
-
-    private fun stopVibration() {
-        try {
-            vibrator?.cancel()
-        } catch (_: Exception) {
-        }
-        vibrator = null
     }
 
     companion object {
@@ -155,42 +145,89 @@ class AlarmPlaybackService : Service() {
         const val EXTRA_BODY = "body"
         const val EXTRA_SESSION_LABEL = "session_label"
 
-        // Versioned v2 channels ensure existing installs immediately switch to silent (no-audio) channels.
-        private const val LEGACY_ACTIVE_CHANNEL_ID = "seireminds_alarm_active_v1"
-        private const val LEGACY_FALLBACK_CHANNEL_ID = "seireminds_alarm_fallback_v1"
-        private const val LEGACY_CANVAS_CHANNEL_ID = "seireminds_canvas_today_v1"
+        private const val LEGACY_ACTIVE_CHANNEL_V1 = "seireminds_alarm_active_v1"
+        private const val LEGACY_ACTIVE_CHANNEL_V2 = "seireminds_alarm_active_v2"
+        private const val LEGACY_FALLBACK_CHANNEL_V1 = "seireminds_alarm_fallback_v1"
+        private const val LEGACY_CANVAS_CHANNEL_V1 = "seireminds_canvas_today_v1"
 
-        private const val ACTIVE_CHANNEL_ID = "seireminds_alarm_active_v2"
+        // v3 active channel enables a 1ms silent pulse + IMPORTANCE_HIGH so Android SystemUI
+        // always pops up a priority heads-up notification with the Stop button (zero audio).
+        private const val ACTIVE_CHANNEL_ID = "seireminds_alarm_active_v3"
         private const val FALLBACK_CHANNEL_ID = "seireminds_alarm_fallback_v2"
         private const val CANVAS_TODAY_CHANNEL_ID = "seireminds_canvas_today_v2"
         private const val FOREGROUND_NOTIFICATION_ID = 4201
+        private const val STOP_BROADCAST_REQUEST_CODE = 4202
         private const val MAX_WAKELOCK_MILLIS = 30 * 60 * 1000L
 
+        private val HEADS_UP_SILENT_PULSE = longArrayOf(0, 1)
         private val HARD_VIBRATION_TIMINGS = longArrayOf(0, 750, 220, 750, 220, 1100, 350)
         private val HARD_VIBRATION_AMPLITUDES = intArrayOf(0, 255, 0, 255, 0, 255, 0)
         private val CANVAS_VIBRATION_TIMINGS = longArrayOf(0, 350, 180, 350)
+
+        @Volatile
+        private var activeVibrator: Vibrator? = null
+
+        private fun resolveVibrator(context: Context): Vibrator {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager)
+                    .defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+        }
+
+        fun cancelActiveVibration(context: Context) {
+            try {
+                activeVibrator?.cancel()
+            } catch (_: Exception) {
+            }
+            activeVibrator = null
+            try {
+                resolveVibrator(context).cancel()
+            } catch (_: Exception) {
+            }
+        }
+
+        /**
+         * Immediately stops vibration, stops the foreground service, and dismisses
+         * the alarm notification without launching any Activity.
+         */
+        fun stopImmediately(context: Context, alarmId: Int = -1) {
+            cancelActiveVibration(context)
+            try {
+                context.stopService(Intent(context, AlarmPlaybackService::class.java))
+            } catch (_: Exception) {
+            }
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(FOREGROUND_NOTIFICATION_ID)
+            if (alarmId > 0) {
+                nm.cancel(alarmId)
+            }
+        }
 
         fun ensureChannels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-            // Remove legacy v1 channels that may have cached audio settings on Android.
-            nm.deleteNotificationChannel(LEGACY_ACTIVE_CHANNEL_ID)
-            nm.deleteNotificationChannel(LEGACY_FALLBACK_CHANNEL_ID)
-            nm.deleteNotificationChannel(LEGACY_CANVAS_CHANNEL_ID)
+            nm.deleteNotificationChannel(LEGACY_ACTIVE_CHANNEL_V1)
+            nm.deleteNotificationChannel(LEGACY_ACTIVE_CHANNEL_V2)
+            nm.deleteNotificationChannel(LEGACY_FALLBACK_CHANNEL_V1)
+            nm.deleteNotificationChannel(LEGACY_CANVAS_CHANNEL_V1)
 
             if (nm.getNotificationChannel(ACTIVE_CHANNEL_ID) == null) {
                 val activeChannel = NotificationChannel(
                     ACTIVE_CHANNEL_ID,
-                    "SeiReminds Vibration Alarms",
+                    "SeiReminds Priority Vibration Alarms",
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "Silent vibration-only class alarms (no audio) that vibrate until you press Stop."
+                    description =
+                        "Priority heads-up class alarms (no audio) with a Stop button on the notification."
                     setBypassDnd(true)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                    // Zero audio; continuous vibration is driven directly by AlarmPlaybackService until Stop.
                     setSound(null, null)
-                    enableVibration(false)
+                    enableVibration(true)
+                    vibrationPattern = HEADS_UP_SILENT_PULSE
                 }
                 nm.createNotificationChannel(activeChannel)
             }
@@ -217,7 +254,8 @@ class AlarmPlaybackService : Service() {
                     "SeiReminds Canvas Updates (Vibrate Only)",
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "Silent vibration-only notifications for Canvas announcements and activities posted today."
+                    description =
+                        "Silent vibration-only notifications for Canvas announcements and activities."
                     setSound(null, null)
                     enableVibration(true)
                     vibrationPattern = CANVAS_VIBRATION_TIMINGS
@@ -226,8 +264,39 @@ class AlarmPlaybackService : Service() {
             }
         }
 
+        private fun buildStopBroadcastIntent(context: Context, alarmId: Int): PendingIntent {
+            val stopIntent = Intent(context, AlarmStopReceiver::class.java).apply {
+                action = ACTION_STOP
+                putExtra(EXTRA_ALARM_ID, alarmId)
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                STOP_BROADCAST_REQUEST_CODE,
+                stopIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
+
+        private fun buildStopAction(context: Context, stopPendingIntent: PendingIntent): Notification.Action {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Notification.Action.Builder(
+                    Icon.createWithResource(context, android.R.drawable.ic_menu_close_clear_cancel),
+                    "Stop",
+                    stopPendingIntent,
+                ).build()
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Action.Builder(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "Stop",
+                    stopPendingIntent,
+                ).build()
+            }
+        }
+
         private fun buildActiveNotification(
             context: Context,
+            alarmId: Int,
             title: String,
             body: String,
         ): Notification {
@@ -240,20 +309,18 @@ class AlarmPlaybackService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
 
-            val stopIntent = PendingIntent.getService(
-                context,
-                FOREGROUND_NOTIFICATION_ID + 1,
-                Intent(context, AlarmPlaybackService::class.java).apply {
-                    action = ACTION_STOP
-                },
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
+            // Direct broadcast PendingIntent stops vibration without opening the app.
+            val stopBroadcastIntent = buildStopBroadcastIntent(context, alarmId)
 
             val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Notification.Builder(context, ACTIVE_CHANNEL_ID)
             } else {
                 @Suppress("DEPRECATION")
                 Notification.Builder(context).setSound(null)
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
             }
 
             builder
@@ -265,15 +332,9 @@ class AlarmPlaybackService : Service() {
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setOngoing(true)
                 .setAutoCancel(false)
+                .setOnlyAlertOnce(false)
                 .setContentIntent(openAppIntent)
-                .setFullScreenIntent(openAppIntent, true)
-
-            val stopAction = Notification.Action.Builder(
-                null,
-                "Stop Alarm",
-                stopIntent,
-            ).build()
-            builder.addAction(stopAction)
+                .addAction(buildStopAction(context, stopBroadcastIntent))
 
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
                 @Suppress("DEPRECATION")
@@ -298,6 +359,7 @@ class AlarmPlaybackService : Service() {
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+            val stopBroadcastIntent = buildStopBroadcastIntent(context, alarmId)
 
             val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Notification.Builder(context, FALLBACK_CHANNEL_ID)
@@ -317,7 +379,7 @@ class AlarmPlaybackService : Service() {
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
                 .setContentIntent(openAppIntent)
-                .setFullScreenIntent(openAppIntent, true)
+                .addAction(buildStopAction(context, stopBroadcastIntent))
                 .build()
 
             nm.notify(alarmId, notification)

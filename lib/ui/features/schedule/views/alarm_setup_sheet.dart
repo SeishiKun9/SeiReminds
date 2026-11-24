@@ -73,7 +73,7 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'SeiReminds uses vibration-only alarms and notifications (no audio) that keep vibrating until you press Stop, so reminders never disturb your class.',
+                  'SeiReminds uses priority heads-up vibration alarms (no audio) with a Stop button right on the notification so you can stop vibrating without opening the app.',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -162,7 +162,7 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                 if (_testTriggered) ...<Widget>[
                   const SizedBox(height: 10),
                   Text(
-                    'Vibration alarm active (no audio). It will keep vibrating continuously until you tap Stop.',
+                    'Priority vibration alarm active (no audio). Tap Stop right on the notification banner (or here) to stop vibrating.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.primary,
                     ),

@@ -404,6 +404,57 @@ void main() {
         (weekday: DateTime.sunday, hour: 23, minute: 55),
       );
     });
+
+    test('announces "Your (online/lecture/laboratory) class is starting ..." with set minutes', () {
+      final schedule = SubjectSchedule(
+        id: 'announce-1',
+        subject: 'Data Structures',
+        section: 'A',
+        reminderMinutesBefore: 15,
+        sessions: <SessionType, SessionSchedule>{
+          SessionType.onlineTime: SessionSchedule(
+            type: SessionType.onlineTime,
+            days: const <int>[DateTime.monday],
+            timeIn: const ScheduleTime(hour: 8, minute: 0),
+            timeOut: const ScheduleTime(hour: 9, minute: 30),
+          ),
+          SessionType.lecture: SessionSchedule(
+            type: SessionType.lecture,
+            days: const <int>[DateTime.monday],
+            timeIn: const ScheduleTime(hour: 10, minute: 0),
+            timeOut: const ScheduleTime(hour: 11, minute: 30),
+          ),
+          SessionType.laboratory: SessionSchedule(
+            type: SessionType.laboratory,
+            days: const <int>[DateTime.monday],
+            timeIn: const ScheduleTime(hour: 13, minute: 0),
+            timeOut: const ScheduleTime(hour: 15, minute: 0),
+          ),
+        },
+      );
+
+      final payloads = buildAlarmPayloads(<SubjectSchedule>[schedule]);
+      expect(
+        payloads.any((p) => p.body.startsWith('Your online class is starting in 15 minutes')),
+        isTrue,
+      );
+      expect(
+        payloads.any((p) => p.body.startsWith('Your lecture class is starting in 15 minutes')),
+        isTrue,
+      );
+      expect(
+        payloads.any((p) => p.body.startsWith('Your laboratory class is starting in 15 minutes')),
+        isTrue,
+      );
+
+      final immediatePayloads = buildAlarmPayloads(<SubjectSchedule>[
+        schedule.copyWith(reminderMinutesBefore: 0),
+      ]);
+      expect(
+        immediatePayloads.any((p) => p.body.startsWith('Your lecture class is starting now')),
+        isTrue,
+      );
+    });
   });
 
   group('SQLite persistence, v1->v2 migration, History & Schedule Protection', () {

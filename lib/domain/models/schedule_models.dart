@@ -68,15 +68,21 @@ String normalizeSectionLetter(String value) {
 }
 
 enum SessionType {
-  onlineTime('online_time', 'Online Time', 'Online'),
-  lecture('lecture', 'Lecture', 'Lecture'),
-  laboratory('laboratory', 'Laboratory', 'Lab');
+  onlineTime('online_time', 'Online Time', 'Online', 'online'),
+  lecture('lecture', 'Lecture', 'Lecture', 'lecture'),
+  laboratory('laboratory', 'Laboratory', 'Lab', 'laboratory');
 
-  const SessionType(this.key, this.label, this.shortLabel);
+  const SessionType(
+    this.key,
+    this.label,
+    this.shortLabel,
+    this.announcementName,
+  );
 
   final String key;
   final String label;
   final String shortLabel;
+  final String announcementName;
 
   static SessionType fromKey(String key) {
     return switch (key) {
@@ -881,8 +887,8 @@ List<ScheduledAlarmPayload> buildAlarmPayloads(
         }
 
         final timingPhrase = schedule.reminderMinutesBefore == 0
-            ? 'starts now'
-            : 'starts in ${schedule.reminderMinutesBefore} min (${session.timeIn.format12Hour()})';
+            ? 'now'
+            : 'in ${schedule.reminderMinutesBefore} ${schedule.reminderMinutesBefore == 1 ? 'minute' : 'minutes'}';
 
         payloads.add(
           ScheduledAlarmPayload(
@@ -893,7 +899,7 @@ List<ScheduledAlarmPayload> buildAlarmPayloads(
             minute: trigger.minute,
             title: '${schedule.subject} · Sec ${schedule.section}',
             body:
-                '${session.type.label} $timingPhrase · ${session.formatTimeRange()}',
+                'Your ${session.type.announcementName} class is starting $timingPhrase · ${session.formatTimeRange()}',
             sessionLabel: session.type.label,
           ),
         );

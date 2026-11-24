@@ -85,7 +85,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('SeiReminds'), findsOneWidget);
-      expect(find.text('v1.0'), findsOneWidget);
+      expect(find.text('v1.1-beta.1'), findsOneWidget);
       expect(find.text('Beta · Offline'), findsNothing);
       for (final day in kSchoolWeekdays) {
         expect(find.byKey(Key('weekday_tab_$day')), findsOneWidget);

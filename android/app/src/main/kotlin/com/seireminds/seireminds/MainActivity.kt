@@ -50,10 +50,10 @@ class MainActivity : FlutterActivity() {
                         val intent = Intent(this, AlarmPlaybackService::class.java).apply {
                             action = AlarmPlaybackService.ACTION_START
                             putExtra(AlarmPlaybackService.EXTRA_ALARM_ID, 999)
-                            putExtra(AlarmPlaybackService.EXTRA_TITLE, "SeiReminds Vibration Test · Sec A")
+                            putExtra(AlarmPlaybackService.EXTRA_TITLE, "SeiReminds Class Reminder · Sec A")
                             putExtra(
                                 AlarmPlaybackService.EXTRA_BODY,
-                                "Vibration-only test (no audio). Keeps vibrating until you tap Stop Alarm.",
+                                "Your lecture class is starting in 10 minutes. Tap Stop on this notification to stop vibrating without opening the app.",
                             )
                             putExtra(AlarmPlaybackService.EXTRA_SESSION_LABEL, "Test")
                         }
@@ -67,8 +67,8 @@ class MainActivity : FlutterActivity() {
                             AlarmPlaybackService.postFallbackAlarmNotification(
                                 context = this,
                                 alarmId = 999,
-                                title = "SeiReminds Vibration Test · Sec A",
-                                body = "Fallback vibration notification triggered (no audio).",
+                                title = "SeiReminds Class Reminder · Sec A",
+                                body = "Your lecture class is starting in 10 minutes. Tap Stop to dismiss.",
                             )
                         }
                         result.success(null)
@@ -88,7 +88,7 @@ class MainActivity : FlutterActivity() {
                     }
 
                     "stopActiveAlarm" -> {
-                        stopService(Intent(this, AlarmPlaybackService::class.java))
+                        AlarmPlaybackService.stopImmediately(this, 999)
                         result.success(null)
                     }
 

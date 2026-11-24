@@ -50,6 +50,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".AlarmStopReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".AlarmBootReceiver"
             android:enabled="true"
             android:exported="true">
