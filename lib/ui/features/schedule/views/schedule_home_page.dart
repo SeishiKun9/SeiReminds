@@ -227,7 +227,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    'v1.1-beta.6',
+                    'v1.1.0',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: theme.colorScheme.onPrimaryContainer,
                       fontWeight: FontWeight.w700,

@@ -99,6 +99,7 @@ class AuthViewModel extends ChangeNotifier {
     required String code,
     required String password,
     String? displayName,
+    String legalConsentVersion = '1.1.0',
   }) async {
     _isBusy = true;
     _errorMessage = null;
@@ -111,6 +112,7 @@ class AuthViewModel extends ChangeNotifier {
         code: code,
         password: password,
         displayName: displayName,
+        legalConsentVersion: legalConsentVersion,
       );
       if (result.succeeded) {
         _currentUser = result.user ?? _authService.currentUser;
@@ -162,6 +164,27 @@ class AuthViewModel extends ChangeNotifier {
         newPassword: newPassword,
       );
       if (result.succeeded) {
+        _infoMessage = result.message;
+      } else {
+        _errorMessage = result.message;
+      }
+      return result;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<AuthActionResult> deleteAccount() async {
+    _isBusy = true;
+    _errorMessage = null;
+    _infoMessage = null;
+    notifyListeners();
+
+    try {
+      final result = await _authService.deleteAccount();
+      if (result.succeeded) {
+        _currentUser = null;
         _infoMessage = result.message;
       } else {
         _errorMessage = result.message;

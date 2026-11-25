@@ -60,6 +60,7 @@ abstract class AuthService {
     required String code,
     required String password,
     String? displayName,
+    String legalConsentVersion = '1.1.0',
   });
 
   Future<AuthActionResult> requestPasswordRecoveryCode(String email);
@@ -69,6 +70,8 @@ abstract class AuthService {
     required String code,
     required String newPassword,
   });
+
+  Future<AuthActionResult> deleteAccount();
 
   Future<void> signOut();
 }
@@ -89,6 +92,9 @@ class SupabaseAuthService implements AuthService {
 
   static Uri get _otpEndpoint =>
       Uri.parse('${SupabaseConfig.url}/functions/v1/auth-otp-gmail');
+
+  static Uri get _deleteAccountEndpoint =>
+      Uri.parse('${SupabaseConfig.url}/functions/v1/delete-account');
 
   GoTrueClient? get _auth {
     if (_authClient != null) return _authClient;
@@ -260,6 +266,7 @@ class SupabaseAuthService implements AuthService {
     required String code,
     required String password,
     String? displayName,
+    String legalConsentVersion = '1.1.0',
   }) async {
     final normalizedEmail = email.trim().toLowerCase();
     final trimmedName = displayName?.trim() ?? '';
@@ -269,6 +276,7 @@ class SupabaseAuthService implements AuthService {
         'email': normalizedEmail,
         'code': code.trim(),
         'password': password,
+        'legal_consent_version': legalConsentVersion,
         if (trimmedName.isNotEmpty) 'display_name': trimmedName,
       },
       defaultSuccessMessage: 'Account verified and created!',
@@ -345,6 +353,79 @@ class SupabaseAuthService implements AuthService {
       offlineMessage:
           'Could not reset password. Check your internet connection.',
     );
+  }
+
+  @override
+  Future<AuthActionResult> deleteAccount({String? accessTokenOverride}) async {
+    final auth = _auth;
+    final token = accessTokenOverride ?? auth?.currentSession?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'Sign in while online to permanently delete your account.',
+      );
+    }
+
+    final ownsClient = _httpClient == null;
+    final client = _httpClient ?? http.Client();
+    try {
+      final response = await client
+          .post(
+            _deleteAccountEndpoint,
+            headers: <String, String>{
+              'Content-Type': 'application/json',
+              'apikey': SupabaseConfig.publishableKey,
+              'Authorization': 'Bearer $token',
+            },
+            body: '{}',
+          )
+          .timeout(const Duration(seconds: 15));
+
+      Map<String, dynamic>? decoded;
+      try {
+        final raw = jsonDecode(response.body);
+        if (raw is Map<String, dynamic>) decoded = raw;
+      } catch (_) {}
+
+      if (response.statusCode != 200) {
+        final errorMsg = (decoded?['error'] is String &&
+                (decoded!['error'] as String).trim().isNotEmpty)
+            ? decoded['error'] as String
+            : 'Could not delete account (HTTP ${response.statusCode}).';
+        return AuthActionResult(succeeded: false, message: errorMsg);
+      }
+
+      try {
+        await auth?.signOut();
+      } catch (_) {}
+
+      final successMsg = (decoded?['message'] is String &&
+              (decoded!['message'] as String).trim().isNotEmpty)
+          ? decoded['message'] as String
+          : 'Your account has been permanently deleted.';
+      return AuthActionResult(succeeded: true, message: successMsg);
+    } on TimeoutException {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'Account deletion timed out. Check your internet connection.',
+      );
+    } on SocketException {
+      return const AuthActionResult(
+        succeeded: false,
+        message:
+            'Internet connection required to delete your account from the server.',
+      );
+    } on http.ClientException {
+      return const AuthActionResult(
+        succeeded: false,
+        message:
+            'Internet connection required to delete your account from the server.',
+      );
+    } finally {
+      if (ownsClient) {
+        client.close();
+      }
+    }
   }
 
   @override

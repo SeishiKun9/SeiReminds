@@ -106,6 +106,7 @@ class _FakeAuthService implements AuthService {
     required String code,
     required String password,
     String? displayName,
+    String legalConsentVersion = '1.1.0',
   }) async {
     final normalized = email.trim().toLowerCase();
     if (_signupCodes[normalized] != code.trim()) {
@@ -176,6 +177,26 @@ class _FakeAuthService implements AuthService {
     return const AuthActionResult(
       succeeded: true,
       message: 'Password updated! You can now sign in with your new password.',
+    );
+  }
+
+  @override
+  Future<AuthActionResult> deleteAccount() async {
+    final active = _user;
+    if (active == null) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'Sign in while online to permanently delete your account.',
+      );
+    }
+    _passwords.remove(active.email);
+    _displayNames.remove(active.email);
+    _user = null;
+    _controller.add(null);
+    return const AuthActionResult(
+      succeeded: true,
+      message:
+          'Your SeiReminds account and server profile data have been permanently deleted.',
     );
   }
 
@@ -548,7 +569,8 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        // Duplicate email (case-insensitive) is rejected before sending a code.
+        // Duplicate email (case-insensitive) is blocked if consent is unchecked first,
+        // and rejected after checking legal consent.
         await tester.enterText(
           find.byKey(const Key('signup_email_field')),
           'STUDENT@hnu.edu.ph',
@@ -561,7 +583,25 @@ void main() {
           find.byKey(const Key('signup_confirm_password_field')),
           'secret123',
         );
-        await tester.tap(find.byKey(const Key('auth_sign_up_button')));
+        final sendBtnFirst = find.byKey(const Key('auth_sign_up_button'));
+        await tester.ensureVisible(sendBtnFirst);
+        await tester.tap(sendBtnFirst);
+        await tester.pumpAndSettle();
+        expect(
+          find.text(
+            'You must agree to the Privacy Policy and Terms of Service to create an account.',
+          ),
+          findsOneWidget,
+        );
+
+        // Agree to Privacy Policy & Terms of Service.
+        final consentBox = find.byKey(const Key('signup_legal_consent_checkbox'));
+        await tester.ensureVisible(consentBox);
+        await tester.tap(consentBox);
+        await tester.pumpAndSettle();
+
+        await tester.ensureVisible(sendBtnFirst);
+        await tester.tap(sendBtnFirst);
         await tester.pumpAndSettle();
 
         expect(
@@ -765,6 +805,130 @@ void main() {
             'verify_recovery_otp',
           ],
         );
+      },
+    );
+
+    test(
+      'SupabaseAuthService.deleteAccount posts Bearer token to delete-account',
+      () async {
+        late http.Request captured;
+        final service = SupabaseAuthService(
+          isAvailable: false,
+          httpClient: MockClient((http.Request req) async {
+            captured = req;
+            return http.Response(
+              jsonEncode(<String, Object>{
+                'ok': true,
+                'message': 'Account deleted.',
+              }),
+              200,
+            );
+          }),
+        );
+
+        final res = await service.deleteAccount(
+          accessTokenOverride: 'jwt-secret-token',
+        );
+        expect(res.succeeded, isTrue);
+        expect(
+          captured.url.toString(),
+          '${SupabaseConfig.url}/functions/v1/delete-account',
+        );
+        expect(captured.headers['Authorization'], 'Bearer jwt-secret-token');
+        expect(captured.headers['apikey'], SupabaseConfig.publishableKey);
+      },
+    );
+
+    testWidgets(
+      'Settings exposes Privacy Policy, Terms of Service, secret-free Export My Data, and permanent in-app Delete Account',
+      (WidgetTester tester) async {
+        final authService = _FakeAuthService(
+          initialUser: const AuthSessionUser(
+            id: 'user-1',
+            email: 'student@hnu.edu.ph',
+            displayName: 'Seishi Student',
+          ),
+        );
+        final repo = ScheduleRepository(
+          database: SqliteScheduleDatabase(
+            databaseFactory: databaseFactoryFfiNoIsolate,
+            databasePath: inMemoryDatabasePath,
+          ),
+          alarmService: _NoopAlarmService(),
+        );
+        final canvasRepo = _createTestCanvasRepo();
+        addTearDown(() async {
+          authService.dispose();
+          await repo.close();
+        });
+
+        await tester.pumpWidget(
+          SeiRemindsApp(
+            repository: repo,
+            canvasRepository: canvasRepo,
+            authService: authService,
+            onlineChecker: () async => true,
+            initialRoute: AppRoutes.settings,
+            initialWeekday: DateTime.monday,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final settingsScrollable = find
+            .descendant(
+              of: find.byType(ListView),
+              matching: find.byType(Scrollable),
+            )
+            .first;
+
+        // Open Privacy Policy viewer offline.
+        final privacyTile = find.byKey(const Key('open_privacy_policy_tile'));
+        await tester.scrollUntilVisible(
+          privacyTile,
+          250,
+          scrollable: settingsScrollable,
+        );
+        await tester.ensureVisible(privacyTile);
+        await tester.tap(privacyTile);
+        await tester.pumpAndSettle();
+        expect(find.text('SeiReminds Privacy Policy'), findsOneWidget);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+
+        // Open Terms of Service viewer offline.
+        final termsTile = find.byKey(const Key('open_terms_of_service_tile'));
+        await tester.ensureVisible(termsTile);
+        await tester.tap(termsTile);
+        await tester.pumpAndSettle();
+        expect(find.text('SeiReminds Terms of Service'), findsOneWidget);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+
+        // Open Export My Data dialog (secret-free JSON).
+        final exportTile = find.byKey(const Key('export_my_data_tile'));
+        await tester.ensureVisible(exportTile);
+        await tester.tap(exportTile);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('export_data_dialog')), findsOneWidget);
+        expect(find.textContaining('Canvas API tokens are excluded'), findsOneWidget);
+        await tester.tap(find.text('Close'));
+        await tester.pumpAndSettle();
+
+        // Permanently delete account -> clears auth session and returns cleanly to offline Home.
+        final deleteBtn = find.byKey(const Key('delete_account_button'));
+        await tester.scrollUntilVisible(
+          deleteBtn,
+          200,
+          scrollable: settingsScrollable,
+        );
+        await tester.ensureVisible(deleteBtn);
+        await tester.tap(deleteBtn);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('confirm_delete_account_button')));
+        await tester.pumpAndSettle();
+
+        expect(authService.currentUser, isNull);
+        expect(find.byKey(const Key('add_schedule_fab')), findsOneWidget);
       },
     );
   });

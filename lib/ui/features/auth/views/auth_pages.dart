@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/app_routes.dart';
+import '../../legal/legal_documents_page.dart';
 import '../view_models/auth_view_model.dart';
 
 String? _validateEmail(String? value) {
@@ -222,6 +223,35 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           icon: const Icon(Icons.cloud_off_outlined, size: 18),
                           label: const Text('Continue Offline (Schedules & Alarms)'),
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 4,
+                          children: <Widget>[
+                            TextButton(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        const LegalDocumentPage.privacyPolicy(),
+                                  ),
+                                );
+                              },
+                              child: const Text('Privacy Policy'),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        const LegalDocumentPage.termsOfService(),
+                                  ),
+                                );
+                              },
+                              child: const Text('Terms of Service'),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -513,6 +543,8 @@ class _SignUpPageState extends State<SignUpPage> {
 
   bool _obscurePassword = true;
   bool _awaitingVerificationCode = false;
+  bool _acceptedLegalTerms = false;
+  String? _consentError;
   int _resendsRemaining = AuthViewModel.maxOtpResends;
 
   @override
@@ -526,7 +558,20 @@ class _SignUpPageState extends State<SignUpPage> {
   }
 
   Future<void> _sendVerificationCode({required bool isResend}) async {
-    if (!isResend && !(_formKey.currentState?.validate() ?? false)) return;
+    if (!isResend) {
+      final formValid = _formKey.currentState?.validate() ?? false;
+      if (!_acceptedLegalTerms) {
+        setState(() {
+          _consentError =
+              'You must agree to the Privacy Policy and Terms of Service to create an account.';
+        });
+        return;
+      }
+      if (!formValid) return;
+      if (_consentError != null) {
+        setState(() => _consentError = null);
+      }
+    }
     if (isResend && _resendsRemaining <= 0) return;
 
     final result = await widget.viewModel.requestSignUpCode(
@@ -554,6 +599,7 @@ class _SignUpPageState extends State<SignUpPage> {
       code: _otpController.text,
       password: _passwordController.text,
       displayName: _nameController.text,
+      legalConsentVersion: kLegalPolicyVersion,
     );
   }
 
@@ -675,7 +721,70 @@ class _SignUpPageState extends State<SignUpPage> {
                                   return null;
                                 },
                               ),
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 12),
+                              CheckboxListTile(
+                                key: const Key('signup_legal_consent_checkbox'),
+                                value: _acceptedLegalTerms,
+                                contentPadding: EdgeInsets.zero,
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                onChanged: vm.isBusy
+                                    ? null
+                                    : (checked) {
+                                        setState(() {
+                                          _acceptedLegalTerms =
+                                              checked ?? false;
+                                          if (_acceptedLegalTerms) {
+                                            _consentError = null;
+                                          }
+                                        });
+                                      },
+                                title: Text(
+                                  'I have read and agree to the Privacy Policy and Terms of Service (v$kLegalPolicyVersion).',
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                              ),
+                              Wrap(
+                                spacing: 4,
+                                children: <Widget>[
+                                  TextButton(
+                                    key: const Key('signup_open_privacy_link'),
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const LegalDocumentPage
+                                                  .privacyPolicy(),
+                                        ),
+                                      );
+                                    },
+                                    child: const Text('Read Privacy Policy'),
+                                  ),
+                                  TextButton(
+                                    key: const Key('signup_open_terms_link'),
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const LegalDocumentPage
+                                                  .termsOfService(),
+                                        ),
+                                      );
+                                    },
+                                    child: const Text('Read Terms'),
+                                  ),
+                                ],
+                              ),
+                              if (_consentError != null) ...<Widget>[
+                                const SizedBox(height: 4),
+                                Text(
+                                  _consentError!,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.error,
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 14),
                               FilledButton(
                                 key: const Key('auth_sign_up_button'),
                                 onPressed: vm.isBusy

@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/app_routes.dart';
 import '../../auth/view_models/auth_view_model.dart';
 import '../../canvas/view_models/canvas_settings_view_model.dart';
+import '../../legal/legal_documents_page.dart';
 import '../view_models/schedule_view_model.dart';
 import 'alarm_setup_sheet.dart';
 
@@ -91,6 +95,142 @@ class _SettingsPageState extends State<SettingsPage> {
           'History permanently deleted from SQLite. All active schedules remain safe.',
         ),
       ),
+    );
+  }
+
+  Future<void> _handleExportData() async {
+    final vm = widget.viewModel;
+    final user = widget.authViewModel?.currentUser;
+    final payload = <String, Object?>{
+      'app': 'SeiReminds',
+      'version': kOfficialAppVersion,
+      'exported_at_utc': DateTime.now().toUtc().toIso8601String(),
+      'security_note':
+          'Canvas API tokens and passwords are never included in data exports.',
+      'account': user != null
+          ? <String, Object?>{
+              'email': user.email,
+              'display_name': user.displayName,
+            }
+          : null,
+      'schedules': vm.schedules.map((s) => s.toJson()).toList(),
+      'events': vm.events.map((e) => e.toJson()).toList(),
+      'history_entries': <Map<String, Object?>>[
+        for (final entry in <dynamic>[...vm.activeHistory, ...vm.archivedHistory])
+          <String, Object?>{
+            'action': entry.action as String,
+            'entity_type': entry.entityType as String,
+            'title': entry.title as String,
+            'details': entry.details as String,
+            'is_archived': entry.isArchived as bool,
+            'created_at': (entry.createdAt as DateTime).toUtc().toIso8601String(),
+          },
+      ],
+      'temporary_canvas_activities_count': vm.canvasActivities.length,
+    };
+    final prettyJson = const JsonEncoder.withIndent('  ').convert(payload);
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('export_data_dialog'),
+        title: const Text('Export My Data (JSON)'),
+        content: SizedBox(
+          width: 420,
+          height: 320,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Secret-free copy of your schedules, events, history, and account email. Canvas API tokens are excluded.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      prettyJson,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+          FilledButton.icon(
+            key: const Key('copy_exported_json_button'),
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: prettyJson));
+              if (!context.mounted) return;
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Exported JSON copied to clipboard.'),
+                ),
+              );
+            },
+            icon: const Icon(Icons.copy_outlined, size: 18),
+            label: const Text('Copy JSON'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleDeleteAccount() async {
+    final authVm = widget.authViewModel;
+    if (authVm == null || !authVm.isAuthenticated) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete account permanently?'),
+        content: const Text(
+          'This permanently deletes your SeiReminds account, server profile, and OTP verification records, and removes your locally encrypted Canvas token.\n\n'
+          'Your offline class schedules and alarms on this device will remain available in Offline Mode.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('confirm_delete_account_button'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete Permanently'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final result = await authVm.deleteAccount();
+    if (!mounted) return;
+    if (result.succeeded) {
+      await widget.canvasViewModel?.clearLocalOnAccountDeletion();
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
     );
   }
 
@@ -508,6 +648,129 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
               ],
+              const SizedBox(height: 20),
+              Text(
+                'Privacy, Legal & Security',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                key: const Key('privacy_legal_card'),
+                child: Column(
+                  children: <Widget>[
+                    ListTile(
+                      key: const Key('open_privacy_policy_tile'),
+                      leading: Icon(
+                        Icons.privacy_tip_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      title: const Text('Privacy Policy'),
+                      subtitle: const Text(
+                        'Offline SQLite, encrypted token storage & RA 10173/GDPR rights',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                const LegalDocumentPage.privacyPolicy(),
+                          ),
+                        );
+                      },
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      key: const Key('open_terms_of_service_tile'),
+                      leading: Icon(
+                        Icons.gavel_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      title: const Text('Terms of Service'),
+                      subtitle: const Text(
+                        'Unofficial app disclaimer, Canvas usage & alarm terms',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                const LegalDocumentPage.termsOfService(),
+                          ),
+                        );
+                      },
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      key: const Key('export_my_data_tile'),
+                      leading: Icon(
+                        Icons.download_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      title: const Text('Export My Data (JSON)'),
+                      subtitle: const Text(
+                        'Copy your schedules, events & history (Canvas token excluded)',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _handleExportData,
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      key: const Key('open_licenses_tile'),
+                      leading: Icon(
+                        Icons.description_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      title: const Text('Open Source Licenses'),
+                      subtitle: const Text('SeiReminds v$kOfficialAppVersion'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        showLicensePage(
+                          context: context,
+                          applicationName: 'SeiReminds',
+                          applicationVersion: kOfficialAppVersion,
+                        );
+                      },
+                    ),
+                    if (widget.authViewModel != null)
+                      ListenableBuilder(
+                        listenable: widget.authViewModel!,
+                        builder: (context, _) {
+                          final authVm = widget.authViewModel!;
+                          if (!authVm.isAuthenticated) {
+                            return const SizedBox.shrink();
+                          }
+                          return Column(
+                            children: <Widget>[
+                              const Divider(height: 1),
+                              ListTile(
+                                key: const Key('delete_account_button'),
+                                leading: Icon(
+                                  Icons.person_remove_outlined,
+                                  color: theme.colorScheme.error,
+                                ),
+                                title: Text(
+                                  'Delete Account Permanently',
+                                  style: TextStyle(
+                                    color: theme.colorScheme.error,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                subtitle: const Text(
+                                  'Erases your server account, profile, OTP rows & Canvas token',
+                                ),
+                                onTap: authVm.isBusy
+                                    ? null
+                                    : _handleDeleteAccount,
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
             ],
           ),
         );

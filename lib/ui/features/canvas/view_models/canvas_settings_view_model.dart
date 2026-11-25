@@ -288,4 +288,13 @@ class CanvasSettingsViewModel extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Clears local encrypted Canvas token and temporary cache immediately after account deletion.
+  Future<void> clearLocalOnAccountDeletion() async {
+    await _repository.disconnect();
+    await _onDisconnected?.call();
+    _metadata = null;
+    _lastOperationStatus = null;
+    notifyListeners();
+  }
 }
