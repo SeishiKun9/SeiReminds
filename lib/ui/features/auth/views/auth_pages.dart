@@ -349,7 +349,7 @@ class _ForgotPasswordOtpDialogState extends State<_ForgotPasswordOtpDialog> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: <Widget>[
                           const Text(
-                            'We will send a 6-digit recovery code to your registered email via Brevo.',
+                            'We will send a 6-digit recovery code directly to your registered email.',
                           ),
                           const SizedBox(height: 12),
                           TextFormField(
@@ -587,7 +587,7 @@ class _SignUpPageState extends State<SignUpPage> {
                       Text(
                         _awaitingVerificationCode
                             ? 'Enter the 6-digit verification code sent to ${_emailController.text.trim().toLowerCase()} to complete signup and unlock Canvas token setup.'
-                            : 'We send a 6-digit verification code to your email via Brevo. A verified account is required to connect your Canvas token.',
+                            : 'We send a 6-digit verification code directly to your email. A verified account is required to connect your Canvas token.',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),

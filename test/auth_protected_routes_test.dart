@@ -326,7 +326,7 @@ void main() {
     });
   });
 
-  group('Supabase Auth, Brevo 6-digit OTP & online-only Canvas guard', () {
+  group('Supabase Auth, Gmail 6-digit OTP & online-only Canvas guard', () {
     testWidgets(
       'non-Canvas screens work offline while signed out, Canvas Settings requires sign-in, and sign-out returns safely to offline timetable',
       (WidgetTester tester) async {
@@ -523,7 +523,7 @@ void main() {
     );
 
     testWidgets(
-      'verifies signup with 6-digit Brevo code, enforces 3-resend cap, and blocks duplicate emails',
+      'verifies signup with 6-digit Gmail code, enforces 3-resend cap, and blocks duplicate emails',
       (WidgetTester tester) async {
         final authService = _FakeAuthService();
         final repo = ScheduleRepository(
@@ -621,7 +621,7 @@ void main() {
     );
 
     testWidgets(
-      'recovers forgotten password via 6-digit Brevo code and allows sign-in with new password',
+      'recovers forgotten password via 6-digit Gmail code and allows sign-in with new password',
       (WidgetTester tester) async {
         final authService = _FakeAuthService();
         final repo = ScheduleRepository(
@@ -688,7 +688,7 @@ void main() {
     );
 
     test(
-      'SupabaseAuthService posts Brevo OTP actions to auth-otp-brevo and parses resends_remaining',
+      'SupabaseAuthService posts Gmail OTP actions to auth-otp-gmail and parses resends_remaining',
       () async {
         final capturedActions = <Map<String, dynamic>>[];
         final service = SupabaseAuthService(
@@ -696,7 +696,7 @@ void main() {
           httpClient: MockClient((http.Request req) async {
             expect(
               req.url.toString(),
-              '${SupabaseConfig.url}/functions/v1/auth-otp-brevo',
+              '${SupabaseConfig.url}/functions/v1/auth-otp-gmail',
             );
             expect(req.headers['apikey'], SupabaseConfig.publishableKey);
             final body = jsonDecode(req.body) as Map<String, dynamic>;

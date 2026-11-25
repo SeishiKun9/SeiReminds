@@ -88,7 +88,7 @@ class SupabaseAuthService implements AuthService {
       'Online account service is unavailable offline. Schedules, events, history, and alarms still work offline.';
 
   static Uri get _otpEndpoint =>
-      Uri.parse('${SupabaseConfig.url}/functions/v1/auth-otp-brevo');
+      Uri.parse('${SupabaseConfig.url}/functions/v1/auth-otp-gmail');
 
   GoTrueClient? get _auth {
     if (_authClient != null) return _authClient;
