@@ -16,6 +16,8 @@ class AuthViewModel extends ChangeNotifier {
     });
   }
 
+  static const int maxOtpResends = 3;
+
   final AuthService _authService;
   late final StreamSubscription<AuthSessionUser?> _subscription;
 
@@ -66,8 +68,35 @@ class AuthViewModel extends ChangeNotifier {
     }
   }
 
-  Future<AuthActionResult> signUp({
+  Future<AuthActionResult> requestSignUpCode({
     required String email,
+    String? displayName,
+  }) async {
+    _isBusy = true;
+    _errorMessage = null;
+    _infoMessage = null;
+    notifyListeners();
+
+    try {
+      final result = await _authService.requestSignUpCode(
+        email: email,
+        displayName: displayName,
+      );
+      if (result.succeeded) {
+        _infoMessage = result.message;
+      } else {
+        _errorMessage = result.message;
+      }
+      return result;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<AuthActionResult> verifySignUpCode({
+    required String email,
+    required String code,
     required String password,
     String? displayName,
   }) async {
@@ -77,8 +106,9 @@ class AuthViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final result = await _authService.signUp(
+      final result = await _authService.verifySignUpCode(
         email: email,
+        code: code,
         password: password,
         displayName: displayName,
       );
@@ -95,14 +125,42 @@ class AuthViewModel extends ChangeNotifier {
     }
   }
 
-  Future<AuthActionResult> sendPasswordReset(String email) async {
+  Future<AuthActionResult> requestPasswordRecoveryCode(String email) async {
     _isBusy = true;
     _errorMessage = null;
     _infoMessage = null;
     notifyListeners();
 
     try {
-      final result = await _authService.sendPasswordResetEmail(email);
+      final result = await _authService.requestPasswordRecoveryCode(email);
+      if (result.succeeded) {
+        _infoMessage = result.message;
+      } else {
+        _errorMessage = result.message;
+      }
+      return result;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<AuthActionResult> verifyPasswordRecoveryCode({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    _isBusy = true;
+    _errorMessage = null;
+    _infoMessage = null;
+    notifyListeners();
+
+    try {
+      final result = await _authService.verifyPasswordRecoveryCode(
+        email: email,
+        code: code,
+        newPassword: newPassword,
+      );
       if (result.succeeded) {
         _infoMessage = result.message;
       } else {

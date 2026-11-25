@@ -20,12 +20,18 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _FakeAuthService implements AuthService {
   _FakeAuthService({AuthSessionUser? initialUser}) : _user = initialUser {
-    _registeredEmails.add('student@hnu.edu.ph');
+    _passwords['student@hnu.edu.ph'] = 'secret123';
+    _displayNames['student@hnu.edu.ph'] = 'Seishi Student';
   }
 
   final StreamController<AuthSessionUser?> _controller =
       StreamController<AuthSessionUser?>.broadcast();
-  final Set<String> _registeredEmails = <String>{};
+  final Map<String, String> _passwords = <String, String>{};
+  final Map<String, String> _displayNames = <String, String>{};
+  final Map<String, String> _signupCodes = <String, String>{};
+  final Map<String, int> _signupSends = <String, int>{};
+  final Map<String, String> _recoveryCodes = <String, String>{};
+  final Map<String, int> _recoverySends = <String, int>{};
   AuthSessionUser? _user;
 
   @override
@@ -44,12 +50,12 @@ class _FakeAuthService implements AuthService {
     required String email,
     required String password,
   }) async {
-    if (email.trim().toLowerCase() == 'student@hnu.edu.ph' &&
-        password == 'secret123') {
-      _user = const AuthSessionUser(
-        id: 'user-1',
-        email: 'student@hnu.edu.ph',
-        displayName: 'Seishi Student',
+    final normalized = email.trim().toLowerCase();
+    if (_passwords[normalized] == password) {
+      _user = AuthSessionUser(
+        id: 'user-$normalized',
+        email: normalized,
+        displayName: _displayNames[normalized],
       );
       _controller.add(_user);
       return AuthActionResult(
@@ -65,38 +71,111 @@ class _FakeAuthService implements AuthService {
   }
 
   @override
-  Future<AuthActionResult> signUp({
+  Future<AuthActionResult> requestSignUpCode({
     required String email,
-    required String password,
     String? displayName,
   }) async {
     final normalized = email.trim().toLowerCase();
-    if (_registeredEmails.contains(normalized)) {
+    if (_passwords.containsKey(normalized)) {
       return const AuthActionResult(
         succeeded: false,
         message:
             'An account with this email already exists. Please sign in instead.',
       );
     }
-    _registeredEmails.add(normalized);
+    final sentCount = _signupSends[normalized] ?? 0;
+    if (sentCount >= 4) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'Resend limit reached (maximum 3 resends).',
+        resendsRemaining: 0,
+      );
+    }
+    _signupSends[normalized] = sentCount + 1;
+    _signupCodes[normalized] = '123456';
+    return AuthActionResult(
+      succeeded: true,
+      message: '6-digit verification code sent to $normalized.',
+      resendsRemaining: (3 - sentCount).clamp(0, 3),
+    );
+  }
+
+  @override
+  Future<AuthActionResult> verifySignUpCode({
+    required String email,
+    required String code,
+    required String password,
+    String? displayName,
+  }) async {
+    final normalized = email.trim().toLowerCase();
+    if (_signupCodes[normalized] != code.trim()) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'Incorrect 6-digit code. 4 attempts remaining.',
+      );
+    }
+    _signupCodes.remove(normalized);
+    _passwords[normalized] = password;
+    if (displayName != null && displayName.trim().isNotEmpty) {
+      _displayNames[normalized] = displayName.trim();
+    }
     _user = AuthSessionUser(
-      id: 'user-${_registeredEmails.length}',
+      id: 'user-${_passwords.length}',
       email: normalized,
-      displayName: displayName?.trim(),
+      displayName: _displayNames[normalized],
     );
     _controller.add(_user);
     return AuthActionResult(
       succeeded: true,
-      message: 'Account created and signed in as ${_user!.label}.',
+      message: 'Account verified and signed in as ${_user!.label}.',
       user: _user,
     );
   }
 
   @override
-  Future<AuthActionResult> sendPasswordResetEmail(String email) async {
+  Future<AuthActionResult> requestPasswordRecoveryCode(String email) async {
+    final normalized = email.trim().toLowerCase();
+    if (!_passwords.containsKey(normalized)) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'No SeiReminds account was found for that email address.',
+      );
+    }
+    final sentCount = _recoverySends[normalized] ?? 0;
+    if (sentCount >= 4) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'Resend limit reached (maximum 3 resends).',
+        resendsRemaining: 0,
+      );
+    }
+    _recoverySends[normalized] = sentCount + 1;
+    _recoveryCodes[normalized] = '654321';
+    return AuthActionResult(
+      succeeded: true,
+      message: '6-digit recovery code sent to $normalized.',
+      resendsRemaining: (3 - sentCount).clamp(0, 3),
+    );
+  }
+
+  @override
+  Future<AuthActionResult> verifyPasswordRecoveryCode({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    final normalized = email.trim().toLowerCase();
+    if (_recoveryCodes[normalized] != code.trim()) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: 'Incorrect 6-digit code. 4 attempts remaining.',
+      );
+    }
+    _recoveryCodes.remove(normalized);
+    _passwords[normalized] = newPassword;
     return const AuthActionResult(
       succeeded: true,
-      message: 'Password reset link sent. Check your email inbox.',
+      message: 'Password updated! You can now sign in with your new password.',
     );
   }
 
@@ -247,7 +326,7 @@ void main() {
     });
   });
 
-  group('Supabase Auth, offline-first non-Canvas access & protected Canvas flow', () {
+  group('Supabase Auth, Brevo 6-digit OTP & online-only Canvas guard', () {
     testWidgets(
       'non-Canvas screens work offline while signed out, Canvas Settings requires sign-in, and sign-out returns safely to offline timetable',
       (WidgetTester tester) async {
@@ -265,12 +344,12 @@ void main() {
           await repo.close();
         });
 
-        // Boot signed out -> offline Home timetable opens immediately without login wall.
         await tester.pumpWidget(
           SeiRemindsApp(
             repository: repo,
             canvasRepository: canvasRepo,
             authService: authService,
+            onlineChecker: () async => true,
             initialWeekday: DateTime.monday,
           ),
         );
@@ -279,7 +358,6 @@ void main() {
         expect(find.byKey(const Key('add_schedule_fab')), findsOneWidget);
         expect(find.byKey(const Key('auth_sign_in_button')), findsNothing);
 
-        // Settings & History works completely offline when signed out.
         await tester.tap(find.byKey(const Key('settings_button')));
         await tester.pumpAndSettle();
 
@@ -290,7 +368,6 @@ void main() {
           findsOneWidget,
         );
 
-        // Tapping Canvas Settings while signed out redirects to LoginPage.
         final settingsScrollable = find
             .descendant(
               of: find.byType(ListView),
@@ -312,7 +389,6 @@ void main() {
         expect(find.byKey(const Key('continue_offline_button')), findsOneWidget);
         expect(find.text('Canvas Settings'), findsNothing);
 
-        // Wrong credentials keep Canvas blocked on LoginPage.
         await tester.enterText(
           find.byKey(const Key('auth_email_field')),
           'student@hnu.edu.ph',
@@ -327,7 +403,6 @@ void main() {
         expect(find.text('Invalid login credentials.'), findsOneWidget);
         expect(find.text('Canvas Settings'), findsNothing);
 
-        // Valid credentials unlock the pending Canvas Settings route!
         await tester.enterText(
           find.byKey(const Key('auth_password_field')),
           'secret123',
@@ -337,7 +412,6 @@ void main() {
 
         expect(find.text('Canvas Settings'), findsOneWidget);
 
-        // Navigate back to Home -> open Settings -> shows signed-in user and Sign Out.
         await tester.pageBack();
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('settings_button')));
@@ -346,12 +420,61 @@ void main() {
         expect(find.text('Seishi Student'), findsOneWidget);
         expect(find.text('student@hnu.edu.ph'), findsOneWidget);
 
-        // Tap Sign Out -> returns cleanly to offline Home timetable.
         await tester.tap(find.byKey(const Key('sign_out_button')));
         await tester.pumpAndSettle();
 
         expect(find.byKey(const Key('add_schedule_fab')), findsOneWidget);
         expect(find.text('Canvas Settings'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'blocks Canvas token Settings while offline even when signed in, and unlocks once back online',
+      (WidgetTester tester) async {
+        var online = false;
+        final authService = _FakeAuthService(
+          initialUser: const AuthSessionUser(
+            id: 'user-1',
+            email: 'student@hnu.edu.ph',
+            displayName: 'Seishi Student',
+          ),
+        );
+        final repo = ScheduleRepository(
+          database: SqliteScheduleDatabase(
+            databaseFactory: databaseFactoryFfiNoIsolate,
+            databasePath: inMemoryDatabasePath,
+          ),
+          alarmService: _NoopAlarmService(),
+        );
+        final canvasRepo = _createTestCanvasRepo();
+        addTearDown(() async {
+          authService.dispose();
+          await repo.close();
+        });
+
+        await tester.pumpWidget(
+          SeiRemindsApp(
+            repository: repo,
+            canvasRepository: canvasRepo,
+            authService: authService,
+            onlineChecker: () async => online,
+            initialRoute: AppRoutes.canvasSettings,
+            initialWeekday: DateTime.monday,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Offline: Canvas token UI is blocked by the online-only guard.
+        expect(find.byKey(const Key('canvas_offline_guard')), findsOneWidget);
+        expect(find.byKey(const Key('canvas_status_label')), findsNothing);
+
+        // Come back online and tap Retry Connection -> Canvas Settings unlocks.
+        online = true;
+        await tester.tap(find.byKey(const Key('canvas_retry_online_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('canvas_offline_guard')), findsNothing);
+        expect(find.byKey(const Key('canvas_status_label')), findsOneWidget);
       },
     );
 
@@ -383,6 +506,7 @@ void main() {
             repository: repo,
             canvasRepository: canvasRepo,
             authService: authService,
+            onlineChecker: () async => true,
             initialRoute: AppRoutes.canvasSettings,
             initialWeekday: DateTime.monday,
           ),
@@ -390,7 +514,6 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Canvas Settings'), findsOneWidget);
 
-        // Simulate remote session invalidation/sign-out event.
         authService.emitRemoteSession(null);
         await tester.pumpAndSettle();
 
@@ -400,7 +523,7 @@ void main() {
     );
 
     testWidgets(
-      'creates account instantly without confirmation email and blocks duplicate email signups',
+      'verifies signup with 6-digit Brevo code, enforces 3-resend cap, and blocks duplicate emails',
       (WidgetTester tester) async {
         final authService = _FakeAuthService();
         final repo = ScheduleRepository(
@@ -425,7 +548,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        // Duplicate email (case-insensitive) is rejected.
+        // Duplicate email (case-insensitive) is rejected before sending a code.
         await tester.enterText(
           find.byKey(const Key('signup_email_field')),
           'STUDENT@hnu.edu.ph',
@@ -447,17 +570,49 @@ void main() {
           ),
           findsOneWidget,
         );
-        expect(find.textContaining('Resend Confirmation'), findsNothing);
 
-        // Fresh email signs up and signs in immediately without any confirmation email step.
+        // Fresh email sends 6-digit code and enters OTP verification step.
         await tester.enterText(
           find.byKey(const Key('signup_email_field')),
           'newstudent@hnu.edu.ph',
         );
-        final signUpBtn = find.byKey(const Key('auth_sign_up_button'));
-        await tester.ensureVisible(signUpBtn);
+        final sendBtn = find.byKey(const Key('auth_sign_up_button'));
+        await tester.ensureVisible(sendBtn);
         await tester.pumpAndSettle();
-        await tester.tap(signUpBtn);
+        await tester.tap(sendBtn);
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('signup_otp_field')), findsOneWidget);
+        expect(find.text('Resend Code (3 left)'), findsOneWidget);
+
+        // Resend 3 times -> hits 0 left and disables button.
+        final resendBtn = find.byKey(const Key('resend_signup_code_button'));
+        for (final expectedLeft in <int>[2, 1, 0]) {
+          await tester.ensureVisible(resendBtn);
+          await tester.tap(resendBtn);
+          await tester.pumpAndSettle();
+          if (expectedLeft > 0) {
+            expect(find.text('Resend Code ($expectedLeft left)'), findsOneWidget);
+          } else {
+            expect(find.text('Resend Limit Reached (0 left)'), findsOneWidget);
+          }
+        }
+
+        // Wrong 6-digit code is rejected.
+        await tester.enterText(
+          find.byKey(const Key('signup_otp_field')),
+          '000000',
+        );
+        await tester.tap(find.byKey(const Key('verify_signup_code_button')));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Incorrect 6-digit code'), findsOneWidget);
+
+        // Valid 6-digit code verifies account and signs in immediately.
+        await tester.enterText(
+          find.byKey(const Key('signup_otp_field')),
+          '123456',
+        );
+        await tester.tap(find.byKey(const Key('verify_signup_code_button')));
         await tester.pumpAndSettle();
 
         expect(find.byKey(const Key('add_schedule_fab')), findsOneWidget);
@@ -465,16 +620,89 @@ void main() {
       },
     );
 
+    testWidgets(
+      'recovers forgotten password via 6-digit Brevo code and allows sign-in with new password',
+      (WidgetTester tester) async {
+        final authService = _FakeAuthService();
+        final repo = ScheduleRepository(
+          database: SqliteScheduleDatabase(
+            databaseFactory: databaseFactoryFfiNoIsolate,
+            databasePath: inMemoryDatabasePath,
+          ),
+          alarmService: _NoopAlarmService(),
+        );
+        addTearDown(() async {
+          authService.dispose();
+          await repo.close();
+        });
+
+        await tester.pumpWidget(
+          SeiRemindsApp(
+            repository: repo,
+            authService: authService,
+            initialRoute: AppRoutes.login,
+            initialWeekday: DateTime.monday,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('auth_forgot_password_button')));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(
+          find.byKey(const Key('recovery_email_field')),
+          'student@hnu.edu.ph',
+        );
+        await tester.tap(find.byKey(const Key('send_recovery_code_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('recovery_otp_field')), findsOneWidget);
+        expect(find.text('Resend Code (3 left)'), findsOneWidget);
+
+        await tester.enterText(
+          find.byKey(const Key('recovery_otp_field')),
+          '654321',
+        );
+        await tester.enterText(
+          find.byKey(const Key('recovery_new_password_field')),
+          'newpass456',
+        );
+        await tester.enterText(
+          find.byKey(const Key('recovery_confirm_password_field')),
+          'newpass456',
+        );
+        await tester.tap(find.byKey(const Key('confirm_recovery_reset_button')));
+        await tester.pumpAndSettle();
+
+        // Sign in on LoginPage with the updated password.
+        await tester.enterText(
+          find.byKey(const Key('auth_password_field')),
+          'newpass456',
+        );
+        await tester.tap(find.byKey(const Key('auth_sign_in_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('add_schedule_fab')), findsOneWidget);
+        expect(authService.currentUser?.email, 'student@hnu.edu.ph');
+      },
+    );
+
     test(
-      'SupabaseAuthService.signUp posts normalized lowercase email to signup-instant and surfaces duplicate 409 error',
+      'SupabaseAuthService posts Brevo OTP actions to auth-otp-brevo and parses resends_remaining',
       () async {
-        late http.Request captured;
+        final capturedActions = <Map<String, dynamic>>[];
         final service = SupabaseAuthService(
           isAvailable: false,
           httpClient: MockClient((http.Request req) async {
-            captured = req;
+            expect(
+              req.url.toString(),
+              '${SupabaseConfig.url}/functions/v1/auth-otp-brevo',
+            );
+            expect(req.headers['apikey'], SupabaseConfig.publishableKey);
             final body = jsonDecode(req.body) as Map<String, dynamic>;
-            if (body['email'] == 'dup@hnu.edu.ph') {
+            capturedActions.add(body);
+            if (body['action'] == 'send_signup_otp' &&
+                body['email'] == 'dup@hnu.edu.ph') {
               return http.Response(
                 jsonEncode(<String, Object>{
                   'error':
@@ -485,39 +713,58 @@ void main() {
             }
             return http.Response(
               jsonEncode(<String, Object>{
-                'user': <String, Object>{
-                  'id': 'u-1',
-                  'email': body['email'] as String,
-                },
+                'ok': true,
+                'resends_remaining': 2,
+                'message': 'Code sent.',
               }),
               200,
             );
           }),
         );
 
-        final dup = await service.signUp(
+        final dup = await service.requestSignUpCode(
           email: '  DUP@HNU.EDU.PH ',
-          password: 'password123',
           displayName: 'Test',
         );
         expect(dup.succeeded, isFalse);
         expect(dup.message, contains('already exists'));
-        expect(
-          captured.url.toString(),
-          '${SupabaseConfig.url}/functions/v1/signup-instant',
-        );
-        expect(captured.headers['apikey'], SupabaseConfig.publishableKey);
-        expect(captured.headers.containsKey('Authorization'), isFalse);
-        expect(
-          (jsonDecode(captured.body) as Map<String, dynamic>)['email'],
-          'dup@hnu.edu.ph',
-        );
 
-        final ok = await service.signUp(
+        final sendSignup = await service.requestSignUpCode(
           email: 'fresh@hnu.edu.ph',
+          displayName: 'Fresh',
+        );
+        expect(sendSignup.succeeded, isTrue);
+        expect(sendSignup.resendsRemaining, 2);
+
+        final verifySignup = await service.verifySignUpCode(
+          email: 'fresh@hnu.edu.ph',
+          code: '123456',
           password: 'password123',
         );
-        expect(ok.succeeded, isTrue);
+        expect(verifySignup.succeeded, isTrue);
+
+        final sendRecovery = await service.requestPasswordRecoveryCode(
+          'fresh@hnu.edu.ph',
+        );
+        expect(sendRecovery.succeeded, isTrue);
+
+        final verifyRecovery = await service.verifyPasswordRecoveryCode(
+          email: 'fresh@hnu.edu.ph',
+          code: '654321',
+          newPassword: 'newpassword123',
+        );
+        expect(verifyRecovery.succeeded, isTrue);
+
+        expect(
+          capturedActions.map((e) => e['action']).toList(),
+          <String>[
+            'send_signup_otp',
+            'send_signup_otp',
+            'verify_signup_otp',
+            'send_recovery_otp',
+            'verify_recovery_otp',
+          ],
+        );
       },
     );
   });

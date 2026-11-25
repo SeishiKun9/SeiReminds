@@ -23,6 +23,12 @@ class CanvasHubPage extends StatefulWidget {
 }
 
 class _CanvasHubPageState extends State<CanvasHubPage> {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(widget.canvasViewModel.load);
+  }
+
   Future<void> _refresh() async {
     await widget.canvasViewModel.syncTodayUpdates();
   }
@@ -125,7 +131,50 @@ class _CanvasHubPageState extends State<CanvasHubPage> {
                 ],
               ),
             ),
-            body: Column(
+            body: !cvm.isOnline
+                ? Center(
+                    key: const Key('canvas_offline_guard'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 400),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Icon(
+                              Icons.wifi_off_rounded,
+                              size: 52,
+                              color: cs.error,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Online Connection Required',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              CanvasSettingsViewModel.offlineCanvasMessage,
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            FilledButton.icon(
+                              key: const Key('canvas_retry_online_button'),
+                              onPressed: cvm.load,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Retry Connection'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+                : Column(
               children: <Widget>[
                 if (!cvm.isConnected)
                   Padding(

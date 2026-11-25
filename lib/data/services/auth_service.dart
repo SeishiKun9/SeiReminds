@@ -32,11 +32,13 @@ class AuthActionResult {
     required this.succeeded,
     required this.message,
     this.user,
+    this.resendsRemaining,
   });
 
   final bool succeeded;
   final String message;
   final AuthSessionUser? user;
+  final int? resendsRemaining;
 }
 
 abstract class AuthService {
@@ -48,13 +50,25 @@ abstract class AuthService {
     required String password,
   });
 
-  Future<AuthActionResult> signUp({
+  Future<AuthActionResult> requestSignUpCode({
     required String email,
+    String? displayName,
+  });
+
+  Future<AuthActionResult> verifySignUpCode({
+    required String email,
+    required String code,
     required String password,
     String? displayName,
   });
 
-  Future<AuthActionResult> sendPasswordResetEmail(String email);
+  Future<AuthActionResult> requestPasswordRecoveryCode(String email);
+
+  Future<AuthActionResult> verifyPasswordRecoveryCode({
+    required String email,
+    required String code,
+    required String newPassword,
+  });
 
   Future<void> signOut();
 }
@@ -72,6 +86,9 @@ class SupabaseAuthService implements AuthService {
 
   static const String _offlineAuthMessage =
       'Online account service is unavailable offline. Schedules, events, history, and alarms still work offline.';
+
+  static Uri get _otpEndpoint =>
+      Uri.parse('${SupabaseConfig.url}/functions/v1/auth-otp-brevo');
 
   GoTrueClient? get _auth {
     if (_authClient != null) return _authClient;
@@ -103,6 +120,77 @@ class SupabaseAuthService implements AuthService {
     if (auth == null) return const Stream<AuthSessionUser?>.empty();
     return auth.onAuthStateChange
         .map((state) => _fromSupabaseUser(state.session?.user));
+  }
+
+  Future<AuthActionResult> _postOtpAction(
+    Map<String, Object> payload, {
+    required String defaultSuccessMessage,
+    required String timeoutMessage,
+    required String offlineMessage,
+  }) async {
+    if (_auth == null && _httpClient == null) {
+      return const AuthActionResult(
+        succeeded: false,
+        message: _offlineAuthMessage,
+      );
+    }
+
+    final ownsClient = _httpClient == null;
+    final client = _httpClient ?? http.Client();
+    try {
+      final response = await client
+          .post(
+            _otpEndpoint,
+            headers: const <String, String>{
+              'Content-Type': 'application/json',
+              'apikey': SupabaseConfig.publishableKey,
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      Map<String, dynamic>? decoded;
+      try {
+        final raw = jsonDecode(response.body);
+        if (raw is Map<String, dynamic>) decoded = raw;
+      } catch (_) {}
+
+      final resendsRemaining = decoded?['resends_remaining'] is num
+          ? (decoded!['resends_remaining'] as num).toInt()
+          : null;
+
+      if (response.statusCode != 200) {
+        final errorMsg = (decoded?['error'] is String &&
+                (decoded!['error'] as String).trim().isNotEmpty)
+            ? decoded['error'] as String
+            : 'Request failed (HTTP ${response.statusCode}).';
+        return AuthActionResult(
+          succeeded: false,
+          message: errorMsg,
+          resendsRemaining: resendsRemaining,
+        );
+      }
+
+      final successMsg = (decoded?['message'] is String &&
+              (decoded!['message'] as String).trim().isNotEmpty)
+          ? decoded['message'] as String
+          : defaultSuccessMessage;
+      return AuthActionResult(
+        succeeded: true,
+        message: successMsg,
+        resendsRemaining: resendsRemaining,
+      );
+    } on TimeoutException {
+      return AuthActionResult(succeeded: false, message: timeoutMessage);
+    } on SocketException {
+      return AuthActionResult(succeeded: false, message: offlineMessage);
+    } on http.ClientException {
+      return AuthActionResult(succeeded: false, message: offlineMessage);
+    } finally {
+      if (ownsClient) {
+        client.close();
+      }
+    }
   }
 
   @override
@@ -144,78 +232,58 @@ class SupabaseAuthService implements AuthService {
     }
   }
 
-  /// Creates an already-confirmed account via the `signup-instant` Edge Function
-  /// (no confirmation email required, duplicate emails rejected) and signs in immediately.
   @override
-  Future<AuthActionResult> signUp({
+  Future<AuthActionResult> requestSignUpCode({
     required String email,
+    String? displayName,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    final trimmedName = displayName?.trim() ?? '';
+    return _postOtpAction(
+      <String, Object>{
+        'action': 'send_signup_otp',
+        'email': normalizedEmail,
+        if (trimmedName.isNotEmpty) 'display_name': trimmedName,
+      },
+      defaultSuccessMessage:
+          '6-digit verification code sent to $normalizedEmail.',
+      timeoutMessage:
+          'Sending verification code timed out. Check your internet connection.',
+      offlineMessage:
+          'Could not send verification code. Check your internet connection.',
+    );
+  }
+
+  @override
+  Future<AuthActionResult> verifySignUpCode({
+    required String email,
+    required String code,
     required String password,
     String? displayName,
   }) async {
-    final auth = _auth;
-    if (auth == null && _httpClient == null) {
-      return const AuthActionResult(
-        succeeded: false,
-        message: _offlineAuthMessage,
-      );
-    }
-
     final normalizedEmail = email.trim().toLowerCase();
     final trimmedName = displayName?.trim() ?? '';
-    final ownsClient = _httpClient == null;
-    final client = _httpClient ?? http.Client();
+    final verified = await _postOtpAction(
+      <String, Object>{
+        'action': 'verify_signup_otp',
+        'email': normalizedEmail,
+        'code': code.trim(),
+        'password': password,
+        if (trimmedName.isNotEmpty) 'display_name': trimmedName,
+      },
+      defaultSuccessMessage: 'Account verified and created!',
+      timeoutMessage:
+          'Verification timed out. Check your internet connection.',
+      offlineMessage:
+          'Could not verify code. Check your internet connection.',
+    );
+    if (!verified.succeeded) return verified;
 
-    try {
-      final response = await client
-          .post(
-            Uri.parse('${SupabaseConfig.url}/functions/v1/signup-instant'),
-            headers: const <String, String>{
-              'Content-Type': 'application/json',
-              'apikey': SupabaseConfig.publishableKey,
-            },
-            body: jsonEncode(<String, Object>{
-              'email': normalizedEmail,
-              'password': password,
-              if (trimmedName.isNotEmpty) 'display_name': trimmedName,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (response.statusCode != 200) {
-        String errorMsg = 'Could not create account (HTTP ${response.statusCode}).';
-        try {
-          final decoded = jsonDecode(response.body);
-          if (decoded is Map<String, dynamic> && decoded['error'] is String) {
-            errorMsg = decoded['error'] as String;
-          }
-        } catch (_) {}
-        return AuthActionResult(succeeded: false, message: errorMsg);
-      }
-    } on TimeoutException {
-      return const AuthActionResult(
-        succeeded: false,
-        message: 'Account creation timed out. Check your internet connection.',
-      );
-    } on SocketException {
-      return const AuthActionResult(
-        succeeded: false,
-        message: 'Could not create account. Check your internet connection.',
-      );
-    } on http.ClientException {
-      return const AuthActionResult(
-        succeeded: false,
-        message: 'Could not create account. Check your internet connection.',
-      );
-    } finally {
-      if (ownsClient) {
-        client.close();
-      }
-    }
-
+    final auth = _auth;
     if (auth == null) {
       return const AuthActionResult(
         succeeded: true,
-        message: 'Account created! You can now sign in.',
+        message: 'Account verified and created! You can now sign in.',
       );
     }
 
@@ -227,43 +295,56 @@ class SupabaseAuthService implements AuthService {
       return AuthActionResult(
         succeeded: true,
         message:
-            'Account created and signed in as ${signInResult.user?.label ?? normalizedEmail}.',
+            'Account verified and signed in as ${signInResult.user?.label ?? normalizedEmail}.',
         user: signInResult.user,
       );
     }
 
     return const AuthActionResult(
       succeeded: false,
-      message: 'Account created, but automatic sign-in failed. Please sign in.',
+      message:
+          'Account verified and created, but automatic sign-in failed. Please sign in.',
     );
   }
 
   @override
-  Future<AuthActionResult> sendPasswordResetEmail(String email) async {
-    final auth = _auth;
-    if (auth == null) {
-      return const AuthActionResult(
-        succeeded: false,
-        message: _offlineAuthMessage,
-      );
-    }
-    try {
-      await auth.resetPasswordForEmail(
-        email.trim().toLowerCase(),
-        redirectTo: SupabaseConfig.authRedirectUrl,
-      );
-      return const AuthActionResult(
-        succeeded: true,
-        message: 'Password reset link sent. Check your email inbox.',
-      );
-    } on AuthException catch (e) {
-      return AuthActionResult(succeeded: false, message: e.message);
-    } catch (_) {
-      return const AuthActionResult(
-        succeeded: false,
-        message: 'Could not send reset email. Check your internet connection.',
-      );
-    }
+  Future<AuthActionResult> requestPasswordRecoveryCode(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    return _postOtpAction(
+      <String, Object>{
+        'action': 'send_recovery_otp',
+        'email': normalizedEmail,
+      },
+      defaultSuccessMessage:
+          '6-digit recovery code sent to $normalizedEmail.',
+      timeoutMessage:
+          'Sending recovery code timed out. Check your internet connection.',
+      offlineMessage:
+          'Could not send recovery code. Check your internet connection.',
+    );
+  }
+
+  @override
+  Future<AuthActionResult> verifyPasswordRecoveryCode({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    return _postOtpAction(
+      <String, Object>{
+        'action': 'verify_recovery_otp',
+        'email': normalizedEmail,
+        'code': code.trim(),
+        'new_password': newPassword,
+      },
+      defaultSuccessMessage:
+          'Password updated! You can now sign in with your new password.',
+      timeoutMessage:
+          'Password reset timed out. Check your internet connection.',
+      offlineMessage:
+          'Could not reset password. Check your internet connection.',
+    );
   }
 
   @override

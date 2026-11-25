@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/app_routes.dart';
 import '../view_models/auth_view_model.dart';
@@ -8,6 +9,14 @@ String? _validateEmail(String? value) {
   if (trimmed.isEmpty) return 'Enter your email address';
   if (!trimmed.contains('@') || !trimmed.contains('.')) {
     return 'Enter a valid email address';
+  }
+  return null;
+}
+
+String? _validateSixDigitCode(String? value) {
+  final trimmed = value?.trim() ?? '';
+  if (!RegExp(r'^\d{6}$').hasMatch(trimmed)) {
+    return 'Enter the 6-digit verification code';
   }
   return null;
 }
@@ -42,17 +51,19 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  Future<void> _resetPassword() async {
-    final email = _emailController.text.trim();
-    if (_validateEmail(email) != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter your email address first to reset your password.'),
-        ),
-      );
-      return;
-    }
-    await widget.viewModel.sendPasswordReset(email);
+  Future<void> _openPasswordRecovery() async {
+    widget.viewModel.clearMessages();
+    final recoveredEmail = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ForgotPasswordOtpDialog(
+        viewModel: widget.viewModel,
+        initialEmail: _emailController.text.trim(),
+      ),
+    );
+    if (!mounted || recoveredEmail == null) return;
+    _emailController.text = recoveredEmail;
+    _passwordController.clear();
   }
 
   @override
@@ -89,7 +100,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Sign in for Canvas settings and online sync. Schedules, events, history, and alarms work offline.',
+                          'Sign in with a verified account (online) to access Canvas token settings & updates. Schedules, events, history, and alarms work offline.',
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
@@ -154,7 +165,7 @@ class _LoginPageState extends State<LoginPage> {
                           alignment: Alignment.centerRight,
                           child: TextButton(
                             key: const Key('auth_forgot_password_button'),
-                            onPressed: vm.isBusy ? null : _resetPassword,
+                            onPressed: vm.isBusy ? null : _openPasswordRecovery,
                             child: const Text('Forgot password?'),
                           ),
                         ),
@@ -225,6 +236,263 @@ class _LoginPageState extends State<LoginPage> {
   }
 }
 
+class _ForgotPasswordOtpDialog extends StatefulWidget {
+  const _ForgotPasswordOtpDialog({
+    required this.viewModel,
+    required this.initialEmail,
+  });
+
+  final AuthViewModel viewModel;
+  final String initialEmail;
+
+  @override
+  State<_ForgotPasswordOtpDialog> createState() =>
+      _ForgotPasswordOtpDialogState();
+}
+
+class _ForgotPasswordOtpDialogState extends State<_ForgotPasswordOtpDialog> {
+  final _emailFormKey = GlobalKey<FormState>();
+  final _resetFormKey = GlobalKey<FormState>();
+  late final TextEditingController _emailController;
+  final TextEditingController _codeController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _confirmController = TextEditingController();
+
+  bool _codeSent = false;
+  bool _obscurePassword = true;
+  int _resendsRemaining = AuthViewModel.maxOtpResends;
+  String? _localMessage;
+  bool _localIsError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController(text: widget.initialEmail);
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _codeController.dispose();
+    _passwordController.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendCode({required bool isResend}) async {
+    if (!isResend && !(_emailFormKey.currentState?.validate() ?? false)) return;
+    if (isResend && _resendsRemaining <= 0) return;
+
+    final result = await widget.viewModel.requestPasswordRecoveryCode(
+      _emailController.text.trim(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _localMessage = result.message;
+      _localIsError = !result.succeeded;
+      if (result.succeeded) {
+        _codeSent = true;
+        _resendsRemaining = result.resendsRemaining ??
+            (isResend
+                ? (_resendsRemaining - 1).clamp(0, AuthViewModel.maxOtpResends)
+                : AuthViewModel.maxOtpResends);
+      } else if (result.resendsRemaining != null) {
+        _resendsRemaining = result.resendsRemaining!;
+      }
+    });
+  }
+
+  Future<void> _confirmReset() async {
+    if (!(_resetFormKey.currentState?.validate() ?? false)) return;
+    final email = _emailController.text.trim().toLowerCase();
+    final result = await widget.viewModel.verifyPasswordRecoveryCode(
+      email: email,
+      code: _codeController.text.trim(),
+      newPassword: _passwordController.text,
+    );
+    if (!mounted) return;
+    if (result.succeeded) {
+      Navigator.of(context).pop(email);
+      return;
+    }
+    setState(() {
+      _localMessage = result.message;
+      _localIsError = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.viewModel,
+      builder: (context, _) {
+        final busy = widget.viewModel.isBusy;
+        return AlertDialog(
+          title: Text(_codeSent ? 'Enter 6-Digit Recovery Code' : 'Password Recovery'),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 360,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (_localMessage != null)
+                    _AuthBanner(
+                      message: _localMessage!,
+                      isError: _localIsError,
+                    ),
+                  if (!_codeSent)
+                    Form(
+                      key: _emailFormKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          const Text(
+                            'We will send a 6-digit recovery code to your registered email via Brevo.',
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            key: const Key('recovery_email_field'),
+                            controller: _emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            decoration: const InputDecoration(
+                              labelText: 'Account Email',
+                              prefixIcon: Icon(Icons.email_outlined),
+                            ),
+                            validator: _validateEmail,
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Form(
+                      key: _resetFormKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          Text(
+                            'Code sent to ${_emailController.text.trim().toLowerCase()}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            key: const Key('recovery_otp_field'),
+                            controller: _codeController,
+                            keyboardType: TextInputType.number,
+                            maxLength: 6,
+                            inputFormatters: <TextInputFormatter>[
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: '6-Digit Recovery Code',
+                              prefixIcon: Icon(Icons.pin_outlined),
+                            ),
+                            validator: _validateSixDigitCode,
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            key: const Key('recovery_new_password_field'),
+                            controller: _passwordController,
+                            obscureText: _obscurePassword,
+                            decoration: InputDecoration(
+                              labelText: 'New Password',
+                              helperText: 'At least 6 characters',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                onPressed: () => setState(
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.length < 6) {
+                                return 'Password must be at least 6 characters';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            key: const Key('recovery_confirm_password_field'),
+                            controller: _confirmController,
+                            obscureText: _obscurePassword,
+                            decoration: const InputDecoration(
+                              labelText: 'Confirm New Password',
+                              prefixIcon: Icon(Icons.lock_reset_outlined),
+                            ),
+                            validator: (value) {
+                              if (value != _passwordController.text) {
+                                return 'Passwords do not match';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              key: const Key('resend_recovery_code_button'),
+                              onPressed: busy || _resendsRemaining <= 0
+                                  ? null
+                                  : () => _sendCode(isResend: true),
+                              icon: const Icon(Icons.refresh, size: 16),
+                              label: Text(
+                                _resendsRemaining > 0
+                                    ? 'Resend Code ($_resendsRemaining left)'
+                                    : 'Resend Limit Reached (0 left)',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: busy ? null : () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            if (!_codeSent)
+              FilledButton(
+                key: const Key('send_recovery_code_button'),
+                onPressed: busy ? null : () => _sendCode(isResend: false),
+                child: busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Send 6-Digit Code'),
+              )
+            else
+              FilledButton(
+                key: const Key('confirm_recovery_reset_button'),
+                onPressed: busy ? null : _confirmReset,
+                child: busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Reset Password'),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key, required this.viewModel});
 
@@ -236,11 +504,16 @@ class SignUpPage extends StatefulWidget {
 
 class _SignUpPageState extends State<SignUpPage> {
   final _formKey = GlobalKey<FormState>();
+  final _otpFormKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
+  final _otpController = TextEditingController();
+
   bool _obscurePassword = true;
+  bool _awaitingVerificationCode = false;
+  int _resendsRemaining = AuthViewModel.maxOtpResends;
 
   @override
   void dispose() {
@@ -248,13 +521,37 @@ class _SignUpPageState extends State<SignUpPage> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
+    _otpController.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    await widget.viewModel.signUp(
+  Future<void> _sendVerificationCode({required bool isResend}) async {
+    if (!isResend && !(_formKey.currentState?.validate() ?? false)) return;
+    if (isResend && _resendsRemaining <= 0) return;
+
+    final result = await widget.viewModel.requestSignUpCode(
       email: _emailController.text,
+      displayName: _nameController.text,
+    );
+    if (!mounted) return;
+    setState(() {
+      if (result.succeeded) {
+        _awaitingVerificationCode = true;
+        _resendsRemaining = result.resendsRemaining ??
+            (isResend
+                ? (_resendsRemaining - 1).clamp(0, AuthViewModel.maxOtpResends)
+                : AuthViewModel.maxOtpResends);
+      } else if (result.resendsRemaining != null) {
+        _resendsRemaining = result.resendsRemaining!;
+      }
+    });
+  }
+
+  Future<void> _verifyAndCreateAccount() async {
+    if (!(_otpFormKey.currentState?.validate() ?? false)) return;
+    await widget.viewModel.verifySignUpCode(
+      email: _emailController.text,
+      code: _otpController.text,
       password: _passwordController.text,
       displayName: _nameController.text,
     );
@@ -275,129 +572,217 @@ class _SignUpPageState extends State<SignUpPage> {
                 padding: const EdgeInsets.all(24),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 420),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        Text(
-                          'Create your SeiReminds account',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Text(
+                        _awaitingVerificationCode
+                            ? 'Verify your email'
+                            : 'Create your SeiReminds account',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'One account per email. No confirmation email needed — you will be signed in right away.',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _awaitingVerificationCode
+                            ? 'Enter the 6-digit verification code sent to ${_emailController.text.trim().toLowerCase()} to complete signup and unlock Canvas token setup.'
+                            : 'We send a 6-digit verification code to your email via Brevo. A verified account is required to connect your Canvas token.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
-                        const SizedBox(height: 16),
-                        if (vm.errorMessage != null)
-                          _AuthBanner(
-                            message: vm.errorMessage!,
-                            isError: true,
-                          ),
-                        if (vm.infoMessage != null)
-                          _AuthBanner(
-                            message: vm.infoMessage!,
-                            isError: false,
-                          ),
-                        TextFormField(
-                          key: const Key('signup_name_field'),
-                          controller: _nameController,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: const InputDecoration(
-                            labelText: 'Display Name (optional)',
-                            prefixIcon: Icon(Icons.person_outline),
-                          ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (vm.errorMessage != null)
+                        _AuthBanner(
+                          message: vm.errorMessage!,
+                          isError: true,
                         ),
-                        const SizedBox(height: 14),
-                        TextFormField(
-                          key: const Key('signup_email_field'),
-                          controller: _emailController,
-                          keyboardType: TextInputType.emailAddress,
-                          decoration: const InputDecoration(
-                            labelText: 'Email',
-                            prefixIcon: Icon(Icons.email_outlined),
-                          ),
-                          validator: _validateEmail,
+                      if (vm.infoMessage != null)
+                        _AuthBanner(
+                          message: vm.infoMessage!,
+                          isError: false,
                         ),
-                        const SizedBox(height: 14),
-                        TextFormField(
-                          key: const Key('signup_password_field'),
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          decoration: InputDecoration(
-                            labelText: 'Password',
-                            helperText: 'At least 6 characters',
-                            prefixIcon: const Icon(Icons.lock_outline),
-                            suffixIcon: IconButton(
-                              onPressed: () {
-                                setState(
-                                  () => _obscurePassword = !_obscurePassword,
-                                );
-                              },
-                              icon: Icon(
-                                _obscurePassword
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
+                      if (!_awaitingVerificationCode)
+                        Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: <Widget>[
+                              TextFormField(
+                                key: const Key('signup_name_field'),
+                                controller: _nameController,
+                                textCapitalization: TextCapitalization.words,
+                                decoration: const InputDecoration(
+                                  labelText: 'Display Name (optional)',
+                                  prefixIcon: Icon(Icons.person_outline),
+                                ),
                               ),
-                            ),
-                          ),
-                          validator: (value) {
-                            if (value == null || value.length < 6) {
-                              return 'Password must be at least 6 characters';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 14),
-                        TextFormField(
-                          key: const Key('signup_confirm_password_field'),
-                          controller: _confirmController,
-                          obscureText: _obscurePassword,
-                          decoration: const InputDecoration(
-                            labelText: 'Confirm Password',
-                            prefixIcon: Icon(Icons.lock_reset_outlined),
-                          ),
-                          validator: (value) {
-                            if (value != _passwordController.text) {
-                              return 'Passwords do not match';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 20),
-                        FilledButton(
-                          key: const Key('auth_sign_up_button'),
-                          onPressed: vm.isBusy ? null : _submit,
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(50),
-                          ),
-                          child: vm.isBusy
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
+                              const SizedBox(height: 14),
+                              TextFormField(
+                                key: const Key('signup_email_field'),
+                                controller: _emailController,
+                                keyboardType: TextInputType.emailAddress,
+                                decoration: const InputDecoration(
+                                  labelText: 'Email',
+                                  prefixIcon: Icon(Icons.email_outlined),
+                                ),
+                                validator: _validateEmail,
+                              ),
+                              const SizedBox(height: 14),
+                              TextFormField(
+                                key: const Key('signup_password_field'),
+                                controller: _passwordController,
+                                obscureText: _obscurePassword,
+                                decoration: InputDecoration(
+                                  labelText: 'Password',
+                                  helperText: 'At least 6 characters',
+                                  prefixIcon: const Icon(Icons.lock_outline),
+                                  suffixIcon: IconButton(
+                                    onPressed: () {
+                                      setState(
+                                        () => _obscurePassword =
+                                            !_obscurePassword,
+                                      );
+                                    },
+                                    icon: Icon(
+                                      _obscurePassword
+                                          ? Icons.visibility_outlined
+                                          : Icons.visibility_off_outlined,
+                                    ),
                                   ),
-                                )
-                              : const Text('Create Account'),
-                        ),
-                        const SizedBox(height: 12),
-                        TextButton(
-                          onPressed: vm.isBusy
-                              ? null
-                              : () {
-                                  vm.clearMessages();
-                                  Navigator.of(context).pop();
+                                ),
+                                validator: (value) {
+                                  if (value == null || value.length < 6) {
+                                    return 'Password must be at least 6 characters';
+                                  }
+                                  return null;
                                 },
-                          child: const Text('Already have an account? Sign In'),
+                              ),
+                              const SizedBox(height: 14),
+                              TextFormField(
+                                key: const Key('signup_confirm_password_field'),
+                                controller: _confirmController,
+                                obscureText: _obscurePassword,
+                                decoration: const InputDecoration(
+                                  labelText: 'Confirm Password',
+                                  prefixIcon: Icon(Icons.lock_reset_outlined),
+                                ),
+                                validator: (value) {
+                                  if (value != _passwordController.text) {
+                                    return 'Passwords do not match';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 20),
+                              FilledButton(
+                                key: const Key('auth_sign_up_button'),
+                                onPressed: vm.isBusy
+                                    ? null
+                                    : () => _sendVerificationCode(
+                                          isResend: false,
+                                        ),
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(50),
+                                ),
+                                child: vm.isBusy
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Text('Send 6-Digit Code'),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Form(
+                          key: _otpFormKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: <Widget>[
+                              TextFormField(
+                                key: const Key('signup_otp_field'),
+                                controller: _otpController,
+                                keyboardType: TextInputType.number,
+                                maxLength: 6,
+                                inputFormatters: <TextInputFormatter>[
+                                  FilteringTextInputFormatter.digitsOnly,
+                                ],
+                                decoration: const InputDecoration(
+                                  labelText: '6-Digit Verification Code',
+                                  prefixIcon: Icon(Icons.pin_outlined),
+                                ),
+                                validator: _validateSixDigitCode,
+                                onFieldSubmitted: (_) =>
+                                    _verifyAndCreateAccount(),
+                              ),
+                              const SizedBox(height: 16),
+                              FilledButton(
+                                key: const Key('verify_signup_code_button'),
+                                onPressed: vm.isBusy
+                                    ? null
+                                    : _verifyAndCreateAccount,
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(50),
+                                ),
+                                child: vm.isBusy
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Text('Verify & Create Account'),
+                              ),
+                              const SizedBox(height: 10),
+                              OutlinedButton.icon(
+                                key: const Key('resend_signup_code_button'),
+                                onPressed: vm.isBusy || _resendsRemaining <= 0
+                                    ? null
+                                    : () => _sendVerificationCode(
+                                          isResend: true,
+                                        ),
+                                icon: const Icon(Icons.refresh, size: 18),
+                                label: Text(
+                                  _resendsRemaining > 0
+                                      ? 'Resend Code ($_resendsRemaining left)'
+                                      : 'Resend Limit Reached (0 left)',
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              TextButton(
+                                key: const Key('edit_signup_details_button'),
+                                onPressed: vm.isBusy
+                                    ? null
+                                    : () {
+                                        vm.clearMessages();
+                                        _otpController.clear();
+                                        setState(() {
+                                          _awaitingVerificationCode = false;
+                                        });
+                                      },
+                                child: const Text('Change email or details'),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
+                      const SizedBox(height: 12),
+                      TextButton(
+                        onPressed: vm.isBusy
+                            ? null
+                            : () {
+                                vm.clearMessages();
+                                Navigator.of(context).pop();
+                              },
+                        child: const Text('Already have an account? Sign In'),
+                      ),
+                    ],
                   ),
                 ),
               ),

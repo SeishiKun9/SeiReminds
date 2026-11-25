@@ -48,6 +48,7 @@ Future<void> main() async {
       repository: repository,
       canvasRepository: canvasRepository,
       authService: authService,
+      onlineChecker: checkOnlineConnectivity,
     ),
   );
 }
@@ -58,6 +59,7 @@ class SeiRemindsApp extends StatefulWidget {
     required this.repository,
     this.canvasRepository,
     this.authService,
+    this.onlineChecker,
     this.initialWeekday,
     this.initialRoute,
   });
@@ -65,6 +67,7 @@ class SeiRemindsApp extends StatefulWidget {
   final ScheduleRepository repository;
   final CanvasTokenRepository? canvasRepository;
   final AuthService? authService;
+  final OnlineStatusChecker? onlineChecker;
   final int? initialWeekday;
   final String? initialRoute;
 
@@ -96,6 +99,7 @@ class _SeiRemindsAppState extends State<SeiRemindsApp> {
         repository: canvasRepo,
         onSyncTodayUpdates: () => _viewModel.syncTodayCanvasUpdates(canvasRepo),
         onDisconnected: _viewModel.clearCanvasDailyCache,
+        onlineChecker: widget.onlineChecker,
       );
       Future.microtask(_canvasViewModel!.load);
     }

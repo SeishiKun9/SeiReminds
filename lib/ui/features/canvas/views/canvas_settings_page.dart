@@ -191,7 +191,50 @@ class _CanvasSettingsPageState extends State<CanvasSettingsPage> {
           ),
           body: vm.isLoading
               ? const Center(child: CircularProgressIndicator())
-              : ListView(
+              : !vm.isOnline
+                  ? Center(
+                      key: const Key('canvas_offline_guard'),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 400),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              Icon(
+                                Icons.wifi_off_rounded,
+                                size: 52,
+                                color: theme.colorScheme.error,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Online Connection Required',
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                CanvasSettingsViewModel.offlineCanvasMessage,
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              FilledButton.icon(
+                                key: const Key('canvas_retry_online_button'),
+                                onPressed: vm.load,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Retry Connection'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )
+                  : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                   children: <Widget>[
                     // Connection Status Card
