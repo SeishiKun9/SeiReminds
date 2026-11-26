@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/app_routes.dart';
+import '../../../core/majestic_chrome.dart';
 import '../../legal/legal_documents_page.dart';
 import '../view_models/auth_view_model.dart';
 
@@ -86,28 +87,37 @@ class _LoginPageState extends State<LoginPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
-                        Icon(
-                          Icons.notifications_active_rounded,
-                          size: 52,
-                          color: theme.colorScheme.primary,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'SeiReminds',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
+                        CelestialHorizonBanner(
+                          borderRadius: BorderRadius.circular(18),
+                          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                          child: Column(
+                            children: <Widget>[
+                              const SeiRemindsEmblem(
+                                size: 56,
+                                showGlow: true,
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                'SeiReminds',
+                                textAlign: TextAlign.center,
+                                style:
+                                    theme.textTheme.headlineMedium?.copyWith(
+                                  color: const Color(0xFFF7F2E4),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Sign in with a verified account (online) to access Canvas token settings & updates. Schedules, events, history, and alarms work offline.',
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: const Color(0xFFD5CCB5),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Sign in with a verified account (online) to access Canvas token settings & updates. Schedules, events, history, and alarms work offline.',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
+                        const GildedRule(verticalMargin: 12),
                         if (vm.errorMessage != null)
                           _AuthBanner(
                             message: vm.errorMessage!,
@@ -621,24 +631,43 @@ class _SignUpPageState extends State<SignUpPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      Text(
-                        _awaitingVerificationCode
-                            ? 'Verify your email'
-                            : 'Create your SeiReminds account',
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
+                      CelestialHorizonBanner(
+                        borderRadius: BorderRadius.circular(16),
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          children: <Widget>[
+                            const SeiRemindsEmblem(size: 48),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    _awaitingVerificationCode
+                                        ? 'Verify your email'
+                                        : 'Create your SeiReminds account',
+                                    style:
+                                        theme.textTheme.titleLarge?.copyWith(
+                                      color: const Color(0xFFF7F2E4),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _awaitingVerificationCode
+                                        ? 'Enter the 6-digit verification code sent to ${_emailController.text.trim().toLowerCase()} to complete signup and unlock Canvas token setup.'
+                                        : 'We send a 6-digit verification code directly to your email. A verified account is required to connect your Canvas token.',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: const Color(0xFFD5CCB5),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _awaitingVerificationCode
-                            ? 'Enter the 6-digit verification code sent to ${_emailController.text.trim().toLowerCase()} to complete signup and unlock Canvas token setup.'
-                            : 'We send a 6-digit verification code directly to your email. A verified account is required to connect your Canvas token.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 18),
                       if (vm.errorMessage != null)
                         _AuthBanner(
                           message: vm.errorMessage!,

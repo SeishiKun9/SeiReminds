@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
-const String kOfficialAppVersion = '1.1.0';
+import '../../core/app_theme.dart';
+import '../../core/majestic_chrome.dart';
+
+const String kOfficialAppVersion = '1.2.0-beta.1';
 const String kLegalPolicyVersion = '1.1.0';
 const String kSupportContactEmail = 'seishikun8@gmail.com';
 
@@ -26,7 +29,22 @@ class LegalDocumentPage extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isPrivacy ? 'Privacy Policy' : 'Terms of Service'),
+        backgroundColor: AppTheme.imperialSapphireDeep,
+        foregroundColor: const Color(0xFFF7F2E4),
+        iconTheme: const IconThemeData(color: Color(0xFFF6E7BE)),
+        title: Row(
+          children: <Widget>[
+            const SeiRemindsEmblem(size: 28),
+            const SizedBox(width: 10),
+            Text(
+              isPrivacy ? 'Privacy Policy' : 'Terms of Service',
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: const Color(0xFFF7F2E4),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),

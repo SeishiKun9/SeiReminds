@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../../domain/models/canvas_token_models.dart';
 import '../../../core/app_routes.dart';
+import '../../../core/app_theme.dart';
+import '../../../core/majestic_chrome.dart';
 import '../../schedule/view_models/schedule_view_model.dart';
 import '../view_models/canvas_settings_view_model.dart';
 
@@ -82,7 +84,22 @@ class _CanvasHubPageState extends State<CanvasHubPage> {
 
           return Scaffold(
             appBar: AppBar(
-              title: const Text('Canvas Hub'),
+              backgroundColor: AppTheme.imperialSapphireDeep,
+              foregroundColor: const Color(0xFFF7F2E4),
+              iconTheme: const IconThemeData(color: Color(0xFFF6E7BE)),
+              title: Row(
+                children: <Widget>[
+                  const SeiRemindsEmblem(size: 30),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Canvas Hub',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      color: const Color(0xFFF7F2E4),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
               actions: <Widget>[
                 if (cvm.isConnected && cvm.canSyncTodayUpdates)
                   IconButton(
@@ -95,7 +112,10 @@ class _CanvasHubPageState extends State<CanvasHubPage> {
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppTheme.burnishedGold,
+                            ),
                           )
                         : const Icon(Icons.refresh),
                   ),
@@ -111,6 +131,11 @@ class _CanvasHubPageState extends State<CanvasHubPage> {
               bottom: TabBar(
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
+                indicatorColor: AppTheme.burnishedGold,
+                indicatorWeight: 2.6,
+                labelColor: const Color(0xFFF8DF9E),
+                unselectedLabelColor: const Color(0xFFB5C0D6),
+                dividerColor: AppTheme.burnishedGold.withValues(alpha: 0.35),
                 tabs: <Widget>[
                   Tab(
                     key: const Key('canvas_tab_general'),

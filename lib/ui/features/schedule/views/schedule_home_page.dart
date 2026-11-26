@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../domain/models/schedule_models.dart';
 import '../../../core/app_routes.dart';
 import '../../../core/app_theme.dart';
+import '../../../core/majestic_chrome.dart';
 import '../../auth/view_models/auth_view_model.dart';
 import '../../canvas/view_models/canvas_settings_view_model.dart';
 import '../view_models/schedule_view_model.dart';
@@ -207,208 +208,279 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
         final nextUp = vm.nextUpcomingSession;
 
         return Scaffold(
-          appBar: AppBar(
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                const Text(
-                  'SeiReminds',
-                  style: TextStyle(fontWeight: FontWeight.w700),
+          body: Column(
+            children: <Widget>[
+              CelestialHorizonBanner(
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  MediaQuery.paddingOf(context).top + 10,
+                  14,
+                  14,
                 ),
-                const SizedBox(width: 8),
-                Container(
-                  key: const Key('official_version_badge'),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    'v1.1.0',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onPrimaryContainer,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            actions: <Widget>[
-              if (widget.canvasViewModel != null)
-                IconButton(
-                  key: const Key('open_canvas_hub_button'),
-                  tooltip: 'Canvas Hub (Announcements, Activities & Reminders)',
-                  onPressed: _openCanvasHub,
-                  icon: Badge(
-                    isLabelVisible: vm.canvasActivities.isNotEmpty,
-                    label: Text('${vm.canvasActivities.length}'),
-                    child: const Icon(Icons.school_outlined),
-                  ),
-                ),
-              IconButton(
-                key: const Key('alarm_setup_button'),
-                tooltip: 'Alarm & Silent-Bypass Setup',
-                onPressed: _openAlarmSetup,
-                icon: Badge(
-                  isLabelVisible: vm.permissionStatus.needsAttention,
-                  child: const Icon(Icons.notifications_active_outlined),
-                ),
-              ),
-              IconButton(
-                key: const Key('settings_button'),
-                tooltip: 'Settings & History',
-                onPressed: _openSettings,
-                icon: const Icon(Icons.settings_outlined),
-              ),
-            ],
-          ),
-          body: vm.isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : Column(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    if (vm.permissionStatus.needsAttention)
-                      _AlertStrip(
-                        icon: Icons.warning_amber_rounded,
-                        message: 'Grant alarm permissions so vibration reminders fire on time while unused.',
-                        actionLabel: 'Setup',
-                        onAction: _openAlarmSetup,
-                      ),
-                    if (vm.bannerMessage != null)
-                      _AlertStrip(
-                        icon: Icons.info_outline,
-                        message: vm.bannerMessage!,
-                        actionLabel: 'Dismiss',
-                        onAction: vm.clearBanner,
-                      ),
+                    Row(
+                      children: <Widget>[
+                        const SeiRemindsEmblem(size: 38),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Row(
+                            children: <Widget>[
+                              Flexible(
+                                child: Text(
+                                  'SeiReminds',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    color: const Color(0xFFF7F2E4),
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                key: const Key('official_version_badge'),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.burnishedGold
+                                      .withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: AppTheme.burnishedGold
+                                        .withValues(alpha: 0.65),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Text(
+                                  'v1.2-beta.1',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: const Color(0xFFF8DF9E),
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (widget.canvasViewModel != null)
+                          RoyalHeaderIconButton(
+                            tooltip:
+                                'Canvas Hub (Announcements, Activities & Reminders)',
+                            onPressed: _openCanvasHub,
+                            icon: Badge(
+                              key: const Key('open_canvas_hub_button'),
+                              isLabelVisible: vm.canvasActivities.isNotEmpty,
+                              backgroundColor: AppTheme.burnishedGold,
+                              textColor: const Color(0xFF141007),
+                              label: Text('${vm.canvasActivities.length}'),
+                              child: const Icon(Icons.school_outlined, size: 20),
+                            ),
+                          ),
+                        RoyalHeaderIconButton(
+                          tooltip: 'Alarm & Silent-Bypass Setup',
+                          onPressed: _openAlarmSetup,
+                          icon: Badge(
+                            key: const Key('alarm_setup_button'),
+                            isLabelVisible: vm.permissionStatus.needsAttention,
+                            backgroundColor: const Color(0xFFF47C84),
+                            child: const Icon(
+                              Icons.notifications_active_outlined,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                        RoyalHeaderIconButton(
+                          tooltip: 'Settings & History',
+                          onPressed: _openSettings,
+                          icon: const Icon(
+                            Icons.settings_outlined,
+                            key: Key('settings_button'),
+                            size: 20,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
                     _WeekdayStrip(
                       selectedWeekday: vm.selectedWeekday,
                       countForDay: vm.subjectCountForDay,
                       eventCountForDay: vm.eventCountForDay,
                       onSelect: vm.selectWeekday,
                     ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-                      child: Row(
+                  ],
+                ),
+              ),
+              Expanded(
+                child: vm.isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : Column(
                         children: <Widget>[
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                          if (vm.permissionStatus.needsAttention)
+                            _AlertStrip(
+                              icon: Icons.warning_amber_rounded,
+                              message:
+                                  'Grant alarm permissions so vibration reminders fire on time while unused.',
+                              actionLabel: 'Setup',
+                              onAction: _openAlarmSetup,
+                            ),
+                          if (vm.bannerMessage != null)
+                            _AlertStrip(
+                              icon: Icons.info_outline,
+                              message: vm.bannerMessage!,
+                              actionLabel: 'Dismiss',
+                              onAction: vm.clearBanner,
+                            ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                            child: Row(
                               children: <Widget>[
-                                Text(
-                                  weekdayFullLabel(vm.selectedWeekday),
-                                  style: theme.textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w700,
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      Text(
+                                        weekdayFullLabel(vm.selectedWeekday),
+                                        style: theme.textTheme.headlineSmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${daySubjects.length} ${daySubjects.length == 1 ? 'subject' : 'subjects'} · ${dayEvents.length} ${dayEvents.length == 1 ? 'event' : 'events'} · ${vm.totalActiveAlarmCount} alarms',
+                                        style: AppTheme.tabularStyle(
+                                          theme.textTheme.bodySmall?.copyWith(
+                                            color: theme
+                                                .colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                Text(
-                                  '${daySubjects.length} ${daySubjects.length == 1 ? 'subject' : 'subjects'} · ${dayEvents.length} ${dayEvents.length == 1 ? 'event' : 'events'} · ${vm.totalActiveAlarmCount} alarms',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
+                                OutlinedButton.icon(
+                                  key: const Key('add_event_button'),
+                                  onPressed: () => _openEventForm(),
+                                  icon: Icon(
+                                    Icons.campaign_outlined,
+                                    size: 18,
+                                    color: AppTheme.goldAccent(theme.brightness),
                                   ),
+                                  label: const Text('Add Event'),
                                 ),
                               ],
                             ),
                           ),
-                          FilledButton.tonalIcon(
-                            key: const Key('add_event_button'),
-                            onPressed: () => _openEventForm(),
-                            icon: const Icon(Icons.campaign_outlined, size: 18),
-                            label: const Text('Add Event'),
+                          Expanded(
+                            child: vm.errorMessage != null
+                                ? Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(24),
+                                      child: Text(
+                                        vm.errorMessage!,
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: theme.colorScheme.error,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : (daySubjects.isEmpty && dayEvents.isEmpty)
+                                ? _EmptyDayView(
+                                    weekday: vm.selectedWeekday,
+                                    onAddPressed: () => _openClassForm(),
+                                  )
+                                : ListView(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      4,
+                                      16,
+                                      96,
+                                    ),
+                                    children: <Widget>[
+                                      if (nextUp != null)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 12,
+                                          ),
+                                          child: _NextClassSummaryCard(
+                                            item: nextUp.item,
+                                            isInProgress: nextUp.isInProgress,
+                                            minutesUntilStart:
+                                                nextUp.minutesUntilStart,
+                                          ),
+                                        ),
+                                      ...dayEvents.map((event) {
+                                        final affected = vm
+                                            .affectedSessionsForDayEvent(
+                                              event,
+                                              vm.selectedWeekday,
+                                            );
+                                        return Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 12,
+                                          ),
+                                          child: _EventAnnouncementCard(
+                                            event: event,
+                                            affectedSessions: affected,
+                                            onEdit: () =>
+                                                _openEventForm(existing: event),
+                                            onDelete: () =>
+                                                _confirmDeleteEvent(event),
+                                            onToggleReminder: (enabled) =>
+                                                vm.toggleEventReminder(
+                                                  event.id,
+                                                  enabled,
+                                                ),
+                                          ),
+                                        );
+                                      }),
+                                      ...daySubjects.map((group) {
+                                        return Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 12,
+                                          ),
+                                          child: _SubjectDayCard(
+                                            group: group,
+                                            conflictingEventsForSession:
+                                                (session) => vm
+                                                    .conflictingEventsForSessionOnDay(
+                                                      group.weekday,
+                                                      session,
+                                                    ),
+                                            onTap: () => _openSubjectDetails(
+                                              group.schedule,
+                                              group.weekday,
+                                            ),
+                                            onEdit: () => _openClassForm(
+                                              existing: group.schedule,
+                                            ),
+                                            onDelete: () =>
+                                                _confirmDeleteSchedule(
+                                                  group.schedule,
+                                                ),
+                                            onToggleReminder: (enabled) =>
+                                                vm.toggleReminder(
+                                                  group.schedule.id,
+                                                  enabled,
+                                                ),
+                                          ),
+                                        );
+                                      }),
+                                    ],
+                                  ),
                           ),
                         ],
                       ),
-                    ),
-                    Expanded(
-                      child: vm.errorMessage != null
-                          ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: Text(
-                                  vm.errorMessage!,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: theme.colorScheme.error,
-                                  ),
-                                ),
-                              ),
-                            )
-                          : (daySubjects.isEmpty && dayEvents.isEmpty)
-                          ? _EmptyDayView(
-                              weekday: vm.selectedWeekday,
-                              onAddPressed: () => _openClassForm(),
-                            )
-                          : ListView(
-                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
-                              children: <Widget>[
-                                if (nextUp != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
-                                    child: _NextClassSummaryCard(
-                                      item: nextUp.item,
-                                      isInProgress: nextUp.isInProgress,
-                                      minutesUntilStart:
-                                          nextUp.minutesUntilStart,
-                                    ),
-                                  ),
-                                ...dayEvents.map((event) {
-                                  final affected = vm
-                                      .affectedSessionsForDayEvent(
-                                        event,
-                                        vm.selectedWeekday,
-                                      );
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
-                                    child: _EventAnnouncementCard(
-                                      event: event,
-                                      affectedSessions: affected,
-                                      onEdit: () =>
-                                          _openEventForm(existing: event),
-                                      onDelete: () =>
-                                          _confirmDeleteEvent(event),
-                                      onToggleReminder: (enabled) =>
-                                          vm.toggleEventReminder(
-                                            event.id,
-                                            enabled,
-                                          ),
-                                    ),
-                                  );
-                                }),
-                                ...daySubjects.map((group) {
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
-                                    child: _SubjectDayCard(
-                                      group: group,
-                                      conflictingEventsForSession: (session) =>
-                                          vm.conflictingEventsForSessionOnDay(
-                                            group.weekday,
-                                            session,
-                                          ),
-                                      onTap: () => _openSubjectDetails(
-                                        group.schedule,
-                                        group.weekday,
-                                      ),
-                                      onEdit: () => _openClassForm(
-                                        existing: group.schedule,
-                                      ),
-                                      onDelete: () => _confirmDeleteSchedule(
-                                        group.schedule,
-                                      ),
-                                      onToggleReminder: (enabled) =>
-                                          vm.toggleReminder(
-                                            group.schedule.id,
-                                            enabled,
-                                          ),
-                                    ),
-                                  );
-                                }),
-                              ],
-                            ),
-                    ),
-                  ],
-                ),
+              ),
+            ],
+          ),
           floatingActionButton: FloatingActionButton.extended(
             key: const Key('add_schedule_fab'),
             onPressed: () => _openClassForm(),
@@ -542,100 +614,113 @@ class _WeekdayStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      child: Row(
-        children: kSchoolWeekdays.map((day) {
-          final selected = day == selectedWeekday;
-          final count = countForDay(day);
-          final hasEvent = eventCountForDay(day) > 0;
-          return Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: Semantics(
-                button: true,
-                selected: selected,
-                label:
-                    '${weekdayFullLabel(day)}, $count classes${hasEvent ? ', has event' : ''}',
-                child: InkWell(
-                  key: Key('weekday_tab_$day'),
-                  onTap: () => onSelect(day),
-                  borderRadius: BorderRadius.circular(14),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 160),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    decoration: BoxDecoration(
+    return Row(
+      children: kSchoolWeekdays.map((day) {
+        final selected = day == selectedWeekday;
+        final count = countForDay(day);
+        final hasEvent = eventCountForDay(day) > 0;
+        return Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: Semantics(
+              button: true,
+              selected: selected,
+              label:
+                  '${weekdayFullLabel(day)}, $count classes${hasEvent ? ', has event' : ''}',
+              child: InkWell(
+                key: Key('weekday_tab_$day'),
+                onTap: () => onSelect(day),
+                borderRadius: BorderRadius.circular(13),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? AppTheme.burnishedGold
+                        : const Color(0x1AF5EFE0),
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(
                       color: selected
-                          ? colorScheme.primary
-                          : colorScheme.surfaceContainerHighest.withValues(
-                              alpha: 0.5,
-                            ),
-                      borderRadius: BorderRadius.circular(14),
+                          ? const Color(0xFFFBE6AE)
+                          : AppTheme.burnishedGold.withValues(alpha: 0.24),
+                      width: selected ? 1.3 : 1.0,
                     ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: <Widget>[
-                            Text(
-                              weekdayShortLabel(day),
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: selected
-                                    ? colorScheme.onPrimary
-                                    : colorScheme.onSurface,
-                              ),
+                    boxShadow: selected
+                        ? const <BoxShadow>[
+                            BoxShadow(
+                              color: Color(0x38E8BE65),
+                              blurRadius: 12,
+                              offset: Offset(0, 4),
                             ),
-                            if (hasEvent) ...<Widget>[
-                              const SizedBox(width: 3),
-                              Container(
-                                width: 6,
-                                height: 6,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: selected
-                                      ? colorScheme.onPrimary
-                                      : colorScheme.error,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? colorScheme.onPrimary.withValues(alpha: 0.2)
-                                : colorScheme.surface,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            '$count',
+                          ]
+                        : null,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: <Widget>[
+                          Text(
+                            weekdayShortLabel(day),
                             style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.2,
                               color: selected
-                                  ? colorScheme.onPrimary
-                                  : colorScheme.onSurfaceVariant,
+                                  ? const Color(0xFF141007)
+                                  : const Color(0xFFF2E8D0),
+                            ),
+                          ),
+                          if (hasEvent) ...<Widget>[
+                            const SizedBox(width: 3),
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: selected
+                                    ? const Color(0xFF7D161E)
+                                    : const Color(0xFFF47C84),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? const Color(0x24141007)
+                              : const Color(0x28000000),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '$count',
+                          style: AppTheme.tabularStyle(
+                            TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: selected
+                                  ? const Color(0xFF141007)
+                                  : const Color(0xFFD6C8A5),
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
             ),
-          );
-        }).toList(),
-      ),
+          ),
+        );
+      }).toList(),
     );
   }
 }
@@ -661,223 +746,228 @@ class _SubjectDayCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final schedule = group.schedule;
     final allCanceled = group.sessions
         .every((s) => conflictingEventsForSession(s).isNotEmpty);
-    final accent = allCanceled
-        ? theme.colorScheme.error
-        : AppTheme.sessionColor(group.sessions.first.type, theme.brightness);
+    final borderColor = allCanceled
+        ? cs.error.withValues(alpha: 0.55)
+        : AppTheme.goldHairline(theme.brightness);
 
     return Card(
       key: Key('subject_card_${schedule.id}'),
       clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: borderColor, width: 1.1),
+      ),
       child: InkWell(
         onTap: onTap,
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 8, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Container(width: 6, color: accent),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
                           children: <Widget>[
-                            Row(
-                              children: <Widget>[
-                                Expanded(
-                                  child: Text(
-                                    schedule.subject,
-                                    style: theme.textTheme.titleMedium
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w700,
-                                          decoration: allCanceled
-                                              ? TextDecoration.lineThrough
-                                              : null,
-                                        ),
-                                  ),
+                            Expanded(
+                              child: Text(
+                                schedule.subject,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  decoration: allCanceled
+                                      ? TextDecoration.lineThrough
+                                      : null,
                                 ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: theme.colorScheme.primaryContainer,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    'Sec ${schedule.section}',
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                      color:
-                                          theme.colorScheme.onPrimaryContainer,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${schedule.formatSharedDaysSummary()} · Tap to view Online, Lecture & Lab',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            ...group.sessions.map((session) {
-                              final conflicts =
-                                  conflictingEventsForSession(session);
-                              final canceled = conflicts.isNotEmpty;
-                              final sessionAccent = canceled
-                                  ? theme.colorScheme.error
-                                  : AppTheme.sessionColor(
-                                      session.type,
-                                      theme.brightness,
-                                    );
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 6),
-                                child: Wrap(
-                                  spacing: 8,
-                                  runSpacing: 4,
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  children: <Widget>[
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 3,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: sessionAccent.withValues(
-                                          alpha: 0.14,
-                                        ),
-                                        borderRadius: BorderRadius.circular(999),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: <Widget>[
-                                          Icon(
-                                            AppTheme.sessionIcon(session.type),
-                                            size: 13,
-                                            color: sessionAccent,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            session.type.label,
-                                            style: theme.textTheme.labelSmall
-                                                ?.copyWith(
-                                                  color: sessionAccent,
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Text(
-                                      session.formatTimeRange(),
-                                      style: theme.textTheme.bodySmall?.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                        decoration: canceled
-                                            ? TextDecoration.lineThrough
-                                            : null,
-                                      ),
-                                    ),
-                                    if (canceled)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color:
-                                              theme.colorScheme.errorContainer,
-                                          borderRadius:
-                                              BorderRadius.circular(999),
-                                        ),
-                                        child: Text(
-                                          'CANCELED · ${conflicts.first.title}',
-                                          style: theme.textTheme.labelSmall
-                                              ?.copyWith(
-                                                color: theme
-                                                    .colorScheme
-                                                    .onErrorContainer,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                        ),
-                                      ),
-                                  ],
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: cs.primaryContainer,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: AppTheme.goldHairline(theme.brightness)
+                                      .withValues(alpha: 0.7),
                                 ),
-                              );
-                            }),
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                Icon(
-                                  schedule.reminderEnabled
-                                      ? Icons.vibration
-                                      : Icons.notifications_off_outlined,
-                                  size: 14,
-                                  color: schedule.reminderEnabled
-                                      ? theme.colorScheme.primary
-                                      : theme.colorScheme.onSurfaceVariant,
+                              ),
+                              child: Text(
+                                'Sec ${schedule.section}',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: cs.onPrimaryContainer,
+                                  fontWeight: FontWeight.w800,
                                 ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  schedule.reminderEnabled
-                                      ? 'Vibrate ${formatReminderLead(schedule.reminderMinutesBefore)}'
-                                      : 'Muted',
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '${schedule.formatSharedDaysSummary()} · Tap to view Online, Lecture & Lab',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Class actions',
+                    onSelected: (value) {
+                      if (value == 'view') {
+                        onTap();
+                      } else if (value == 'edit') {
+                        onEdit();
+                      } else if (value == 'toggle') {
+                        onToggleReminder(!schedule.reminderEnabled);
+                      } else if (value == 'delete') {
+                        onDelete();
+                      }
+                    },
+                    itemBuilder: (_) => <PopupMenuEntry<String>>[
+                      const PopupMenuItem<String>(
+                        value: 'view',
+                        child: Text('View Online, Lecture & Lab'),
+                      ),
+                      const PopupMenuItem<String>(
+                        value: 'edit',
+                        child: Text('Edit schedule'),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'toggle',
+                        child: Text(
+                          schedule.reminderEnabled
+                              ? 'Mute alarm'
+                              : 'Enable alarm',
+                        ),
+                      ),
+                      const PopupMenuItem<String>(
+                        value: 'delete',
+                        child: Text('Remove from schedule'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 8, 8, 10),
+                child: Divider(
+                  height: 1,
+                  color: cs.outlineVariant.withValues(alpha: 0.7),
+                ),
+              ),
+              ...group.sessions.map((session) {
+                final conflicts = conflictingEventsForSession(session);
+                final canceled = conflicts.isNotEmpty;
+                final sessionAccent = canceled
+                    ? cs.error
+                    : AppTheme.sessionColor(session.type, theme.brightness);
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 0, 8, 7),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: sessionAccent.withValues(alpha: 0.13),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: sessionAccent.withValues(alpha: 0.32),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Icon(
+                              AppTheme.sessionIcon(session.type),
+                              size: 13,
+                              color: sessionAccent,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              session.type.label,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: sessionAccent,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      PopupMenuButton<String>(
-                        tooltip: 'Class actions',
-                        onSelected: (value) {
-                          if (value == 'view') {
-                            onTap();
-                          } else if (value == 'edit') {
-                            onEdit();
-                          } else if (value == 'toggle') {
-                            onToggleReminder(!schedule.reminderEnabled);
-                          } else if (value == 'delete') {
-                            onDelete();
-                          }
-                        },
-                        itemBuilder: (_) => <PopupMenuEntry<String>>[
-                          const PopupMenuItem<String>(
-                            value: 'view',
-                            child: Text('View Online, Lecture & Lab'),
+                      Text(
+                        session.formatTimeRange(),
+                        style: AppTheme.tabularStyle(
+                          theme.textTheme.bodySmall?.copyWith(
+                            color: cs.onSurface,
+                            fontWeight: FontWeight.w600,
+                            decoration:
+                                canceled ? TextDecoration.lineThrough : null,
                           ),
-                          const PopupMenuItem<String>(
-                            value: 'edit',
-                            child: Text('Edit schedule'),
+                        ),
+                      ),
+                      if (canceled)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 2,
                           ),
-                          PopupMenuItem<String>(
-                            value: 'toggle',
-                            child: Text(
-                              schedule.reminderEnabled
-                                  ? 'Mute alarm'
-                                  : 'Enable alarm',
+                          decoration: BoxDecoration(
+                            color: cs.errorContainer,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            'CANCELED · ${conflicts.first.title}',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: cs.onErrorContainer,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                          const PopupMenuItem<String>(
-                            value: 'delete',
-                            child: Text('Remove from schedule'),
-                          ),
-                        ],
-                      ),
+                        ),
                     ],
                   ),
+                );
+              }),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(
+                      schedule.reminderEnabled
+                          ? Icons.vibration
+                          : Icons.notifications_off_outlined,
+                      size: 14,
+                      color: schedule.reminderEnabled
+                          ? AppTheme.goldAccent(theme.brightness)
+                          : cs.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      schedule.reminderEnabled
+                          ? 'Vibrate ${formatReminderLead(schedule.reminderMinutesBefore)}'
+                          : 'Muted',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1088,38 +1178,38 @@ class _EmptyDayView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(
-              Icons.event_note_outlined,
-              size: 56,
-              color: theme.colorScheme.outline,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'No classes on ${weekdayFullLabel(weekday)}',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const SeiRemindsEmblem(size: 72, showGlow: true),
+              const GildedRule(verticalMargin: 16),
+              Text(
+                'No classes on ${weekdayFullLabel(weekday)}',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Add a subject with Section A–Z and Online Time, Lecture, or Laboratory times.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+              const SizedBox(height: 8),
+              Text(
+                'Add a subject with Section A–Z and Online Time, Lecture, or Laboratory times.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonalIcon(
-              onPressed: onAddPressed,
-              icon: const Icon(Icons.add),
-              label: Text('Add for ${weekdayShortLabel(weekday)}'),
-            ),
-          ],
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: onAddPressed,
+                icon: const Icon(Icons.add),
+                label: Text('Add for ${weekdayShortLabel(weekday)}'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1200,54 +1290,65 @@ class _NextClassSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Card(
+    return CelestialHorizonBanner(
       key: const Key('next_class_card'),
-      color: cs.primaryContainer.withValues(alpha: 0.72),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
-          children: <Widget>[
-            CircleAvatar(
-              backgroundColor: cs.primary,
-              foregroundColor: cs.onPrimary,
-              child: Icon(
-                isInProgress ? Icons.play_arrow_rounded : Icons.schedule,
-                size: 20,
+      borderRadius: BorderRadius.circular(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppTheme.burnishedGold.withValues(alpha: 0.18),
+              border: Border.all(
+                color: AppTheme.burnishedGold.withValues(alpha: 0.75),
+                width: 1.3,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    '${isInProgress ? 'NOW' : 'UP NEXT'} · ${_formatLead()}',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: cs.onPrimaryContainer,
+            child: Icon(
+              isInProgress ? Icons.play_arrow_rounded : Icons.schedule,
+              size: 22,
+              color: const Color(0xFFF8DF9E),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  '${isInProgress ? 'NOW' : 'UP NEXT'} · ${_formatLead()}',
+                  style: AppTheme.tabularStyle(
+                    theme.textTheme.labelSmall?.copyWith(
+                      color: AppTheme.burnishedGold,
                       fontWeight: FontWeight.w800,
-                      letterSpacing: 0.4,
+                      letterSpacing: 0.6,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${item.schedule.subject} · Sec ${item.schedule.section}',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: cs.onPrimaryContainer,
-                      fontWeight: FontWeight.w700,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${item.schedule.subject} · Sec ${item.schedule.section}',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: const Color(0xFFF7F2E4),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${item.session.type.label} · ${item.session.formatTimeRange()}',
+                  style: AppTheme.tabularStyle(
+                    theme.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFFD5CCB5),
                     ),
                   ),
-                  Text(
-                    '${item.session.type.label} · ${item.session.formatTimeRange()}',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: cs.onPrimaryContainer,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
