@@ -137,6 +137,7 @@ class AlarmPlaybackService : Service() {
         private const val LEGACY_FALLBACK_CHANNEL_V2 = "seireminds_alarm_fallback_v2"
         private const val LEGACY_CANVAS_CHANNEL_V1 = "seireminds_canvas_today_v1"
         private const val LEGACY_CANVAS_CHANNEL_V2 = "seireminds_canvas_today_v2"
+        private const val LEGACY_CANVAS_CHANNEL_V3 = "seireminds_canvas_today_v3"
 
         // Low-key service channel keeps FGS alive without fighting heads-up banners.
         private const val SERVICE_CHANNEL_ID = "seireminds_alarm_service_v1"
@@ -145,7 +146,9 @@ class AlarmPlaybackService : Service() {
         // + real vibration pulse so AOSP & OEMs (OneUI/MIUI/ColorOS) always pop a floating banner.
         const val ACTIVE_CHANNEL_ID = "seireminds_alarm_active_v4"
         private const val FALLBACK_CHANNEL_ID = "seireminds_alarm_fallback_v3"
-        private const val CANVAS_TODAY_CHANNEL_ID = "seireminds_canvas_today_v3"
+        // v4 Canvas notification pop-up channel bypasses DND & silent mode while remaining
+        // a normal dismissible notification (never a repeating class alarm).
+        const val CANVAS_TODAY_CHANNEL_ID = "seireminds_canvas_today_v4"
 
         private const val FOREGROUND_NOTIFICATION_ID = 4201
         private const val STOP_BROADCAST_REQUEST_CODE = 4202
@@ -176,13 +179,6 @@ class AlarmPlaybackService : Service() {
         private fun alarmAudioAttributes(): AudioAttributes {
             return AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-        }
-
-        private fun notificationAudioAttributes(): AudioAttributes {
-            return AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
         }
@@ -245,6 +241,34 @@ class AlarmPlaybackService : Service() {
             }
         }
 
+        private fun vibrateCanvasNotificationOnce(context: Context) {
+            // Never interrupt an active class schedule alarm with a notification buzz.
+            if (isAlarmActive.get()) return
+            val vib = resolveVibrator(context)
+            if (!vib.hasVibrator()) return
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    val effect = VibrationEffect.createWaveform(CANVAS_VIBRATION_TIMINGS, -1)
+                    // Single non-repeating pulse (repeat = -1) using USAGE_ALARM so it still
+                    // delivers tactile feedback in Silent Mode and DND without becoming an alarm.
+                    val attrs = VibrationAttributes.Builder()
+                        .setUsage(VibrationAttributes.USAGE_ALARM)
+                        .build()
+                    vib.vibrate(effect, attrs)
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val effect = VibrationEffect.createWaveform(CANVAS_VIBRATION_TIMINGS, -1)
+                    @Suppress("DEPRECATION")
+                    vib.vibrate(effect, alarmAudioAttributes())
+                } else {
+                    @Suppress("DEPRECATION")
+                    vib.vibrate(CANVAS_VIBRATION_TIMINGS, -1)
+                }
+            } catch (_: Exception) {
+                // Keep the DND-bypassing notification pop-up visible even if vibrator rejects.
+            }
+        }
+
         private fun cancelPendingVibrationStart() {
             pendingVibrationRunnable?.let { mainHandler.removeCallbacks(it) }
             pendingVibrationRunnable = null
@@ -298,6 +322,7 @@ class AlarmPlaybackService : Service() {
             nm.deleteNotificationChannel(LEGACY_FALLBACK_CHANNEL_V2)
             nm.deleteNotificationChannel(LEGACY_CANVAS_CHANNEL_V1)
             nm.deleteNotificationChannel(LEGACY_CANVAS_CHANNEL_V2)
+            nm.deleteNotificationChannel(LEGACY_CANVAS_CHANNEL_V3)
 
             if (nm.getNotificationChannel(SERVICE_CHANNEL_ID) == null) {
                 val serviceChannel = NotificationChannel(
@@ -353,15 +378,18 @@ class AlarmPlaybackService : Service() {
             if (nm.getNotificationChannel(CANVAS_TODAY_CHANNEL_ID) == null) {
                 val canvasChannel = NotificationChannel(
                     CANVAS_TODAY_CHANNEL_ID,
-                    "SeiReminds Canvas Updates (Vibrate Only)",
+                    "SeiReminds Canvas Notification Pop-ups",
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
                     description =
-                        "Silent vibration-only heads-up notifications for Canvas announcements and activities."
+                        "Heads-up Canvas announcements and activity pop-ups (bypasses DND & silent mode; never triggers a class alarm)."
+                    setBypassDnd(true)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                    setSound(silentSoundUri(context), notificationAudioAttributes())
+                    // Pure-silence WAV + USAGE_ALARM lets the pop-up bypass Silent/DND without ringtone audio.
+                    setSound(silentSoundUri(context), alarmAudioAttributes())
                     enableVibration(true)
                     vibrationPattern = CANVAS_VIBRATION_TIMINGS
+                    enableLights(true)
                 }
                 nm.createNotificationChannel(canvasChannel)
             }
@@ -560,14 +588,19 @@ class AlarmPlaybackService : Service() {
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(Notification.BigTextStyle().bigText(body))
+                // Explicitly CATEGORY_REMINDER (never CATEGORY_ALARM) so Canvas stays a pop-up notification.
+                .setCategory(Notification.CATEGORY_REMINDER)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setOngoing(false)
                 .setAutoCancel(true)
+                .setOnlyAlertOnce(false)
                 .setWhen(System.currentTimeMillis())
                 .setShowWhen(true)
                 .setContentIntent(openAppIntent)
                 .build()
 
             nm.notify(notificationId, notification)
+            vibrateCanvasNotificationOnce(context)
         }
     }
 }

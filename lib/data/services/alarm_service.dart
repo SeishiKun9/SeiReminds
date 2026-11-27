@@ -33,6 +33,7 @@ class AlarmPermissionStatus {
       (!notificationsGranted ||
           !exactAlarmsAllowed ||
           !fullScreenIntentAllowed ||
+          !dndAccessGranted ||
           !ignoringBatteryOptimizations);
 }
 
@@ -50,6 +51,7 @@ abstract class AlarmService {
   Future<void> openExactAlarmSettings();
   Future<void> openFullScreenIntentSettings();
   Future<void> openAlarmChannelSettings();
+  Future<void> openCanvasChannelSettings();
   Future<void> openDndSettings();
   Future<void> openBatteryOptimizationSettings();
 }
@@ -161,6 +163,12 @@ class MethodChannelAlarmService implements AlarmService {
   Future<void> openAlarmChannelSettings() async {
     if (!_isAndroid) return;
     await _channel.invokeMethod<void>('openAlarmChannelSettings');
+  }
+
+  @override
+  Future<void> openCanvasChannelSettings() async {
+    if (!_isAndroid) return;
+    await _channel.invokeMethod<void>('openCanvasChannelSettings');
   }
 
   @override

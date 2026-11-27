@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../core/app_theme.dart';
 import '../../core/majestic_chrome.dart';
 
 const String kOfficialAppVersion = '1.2.0-beta.1';
@@ -29,20 +28,11 @@ class LegalDocumentPage extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: AppTheme.imperialSapphireDeep,
-        foregroundColor: const Color(0xFFF7F2E4),
-        iconTheme: const IconThemeData(color: Color(0xFFF6E7BE)),
         title: Row(
           children: <Widget>[
             const SeiRemindsEmblem(size: 28),
             const SizedBox(width: 10),
-            Text(
-              isPrivacy ? 'Privacy Policy' : 'Terms of Service',
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: const Color(0xFFF7F2E4),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+            Text(isPrivacy ? 'Privacy Policy' : 'Terms of Service'),
           ],
         ),
       ),
@@ -121,7 +111,7 @@ const List<({String title, String body})> _privacySections =
   (
     title: '1. Offline Local Data (Stays on Your Device)',
     body:
-        'Your class schedules, school events, reminder settings, and history logs are stored strictly on your device in SQLite. Canvas announcements stay in memory for the current day only and are never saved to SQLite. Only temporary Canvas activity deadlines are cached in SQLite until their due date passes, then automatically deleted.',
+        'Your class schedules (acronyms, full subject names, classrooms, teacher names), school events, reminder settings, and history logs are stored strictly on your device in SQLite. Schedule Photo Import scans images 100% on-device using offline OCR—photos are never uploaded to any server. Canvas announcements stay in memory for the current day only and are never saved to SQLite. Only temporary Canvas activity deadlines are cached in SQLite until their due date passes, then automatically deleted.',
   ),
   (
     title: '2. Encrypted Canvas API Token Storage',

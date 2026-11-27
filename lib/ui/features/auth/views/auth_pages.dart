@@ -88,21 +88,16 @@ class _LoginPageState extends State<LoginPage> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
                         CelestialHorizonBanner(
-                          borderRadius: BorderRadius.circular(18),
-                          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                          borderRadius: BorderRadius.circular(16),
+                          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
                           child: Column(
                             children: <Widget>[
-                              const SeiRemindsEmblem(
-                                size: 56,
-                                showGlow: true,
-                              ),
-                              const SizedBox(height: 10),
+                              const SeiRemindsEmblem(size: 54),
+                              const SizedBox(height: 12),
                               Text(
                                 'SeiReminds',
                                 textAlign: TextAlign.center,
-                                style:
-                                    theme.textTheme.headlineMedium?.copyWith(
-                                  color: const Color(0xFFF7F2E4),
+                                style: theme.textTheme.headlineMedium?.copyWith(
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
@@ -111,13 +106,13 @@ class _LoginPageState extends State<LoginPage> {
                                 'Sign in with a verified account (online) to access Canvas token settings & updates. Schedules, events, history, and alarms work offline.',
                                 textAlign: TextAlign.center,
                                 style: theme.textTheme.bodySmall?.copyWith(
-                                  color: const Color(0xFFD5CCB5),
+                                  color: theme.colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        const GildedRule(verticalMargin: 12),
+                        const SizedBox(height: 16),
                         if (vm.errorMessage != null)
                           _AuthBanner(
                             message: vm.errorMessage!,
@@ -636,7 +631,7 @@ class _SignUpPageState extends State<SignUpPage> {
                         padding: const EdgeInsets.all(16),
                         child: Row(
                           children: <Widget>[
-                            const SeiRemindsEmblem(size: 48),
+                            const SeiRemindsEmblem(size: 46),
                             const SizedBox(width: 14),
                             Expanded(
                               child: Column(
@@ -646,9 +641,7 @@ class _SignUpPageState extends State<SignUpPage> {
                                     _awaitingVerificationCode
                                         ? 'Verify your email'
                                         : 'Create your SeiReminds account',
-                                    style:
-                                        theme.textTheme.titleLarge?.copyWith(
-                                      color: const Color(0xFFF7F2E4),
+                                    style: theme.textTheme.titleLarge?.copyWith(
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
@@ -658,7 +651,7 @@ class _SignUpPageState extends State<SignUpPage> {
                                         ? 'Enter the 6-digit verification code sent to ${_emailController.text.trim().toLowerCase()} to complete signup and unlock Canvas token setup.'
                                         : 'We send a 6-digit verification code directly to your email. A verified account is required to connect your Canvas token.',
                                     style: theme.textTheme.bodySmall?.copyWith(
-                                      color: const Color(0xFFD5CCB5),
+                                      color: theme.colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                 ],

@@ -8,6 +8,7 @@ import 'data/services/alarm_service.dart';
 import 'data/services/auth_service.dart';
 import 'data/services/canvas_api_client.dart';
 import 'data/services/canvas_secure_storage.dart';
+import 'data/services/schedule_ocr_service.dart';
 import 'data/services/sqlite_database_service.dart';
 import 'ui/core/app_routes.dart';
 import 'ui/core/app_theme.dart';
@@ -60,6 +61,7 @@ class SeiRemindsApp extends StatefulWidget {
     this.canvasRepository,
     this.authService,
     this.onlineChecker,
+    this.ocrService,
     this.initialWeekday,
     this.initialRoute,
   });
@@ -68,6 +70,7 @@ class SeiRemindsApp extends StatefulWidget {
   final CanvasTokenRepository? canvasRepository;
   final AuthService? authService;
   final OnlineStatusChecker? onlineChecker;
+  final ScheduleOcrService? ocrService;
   final int? initialWeekday;
   final String? initialRoute;
 
@@ -176,6 +179,7 @@ class _SeiRemindsAppState extends State<SeiRemindsApp> {
             : ScheduleHomePage(
                 viewModel: _viewModel,
                 authViewModel: _authViewModel,
+                ocrService: widget.ocrService,
               );
       case AppRoutes.canvasSettings:
         page = _canvasViewModel != null
@@ -190,6 +194,7 @@ class _SeiRemindsAppState extends State<SeiRemindsApp> {
           viewModel: _viewModel,
           canvasViewModel: _canvasViewModel,
           authViewModel: _authViewModel,
+          ocrService: widget.ocrService,
         );
     }
 

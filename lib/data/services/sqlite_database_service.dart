@@ -13,7 +13,7 @@ class SqliteScheduleDatabase {
   });
 
   static const String dbFileName = 'seireminds.db';
-  static const int _dbVersion = 4;
+  static const int _dbVersion = 5;
   static const String _metaLastCleanupDate = 'last_daily_cleanup_date';
   static const String _metaLastCleanupRemoved = 'last_daily_cleanup_removed';
   static const String _metaHistoryViewEnabled = 'history_view_enabled';
@@ -47,8 +47,11 @@ class SqliteScheduleDatabase {
     await db.execute('''
       CREATE TABLE schedules (
         id TEXT PRIMARY KEY,
+        subject_code TEXT NOT NULL DEFAULT '',
         subject TEXT NOT NULL,
         section TEXT NOT NULL,
+        classroom TEXT NOT NULL DEFAULT '',
+        teacher_name TEXT NOT NULL DEFAULT '',
         reminder_minutes_before INTEGER NOT NULL,
         reminder_enabled INTEGER NOT NULL,
         updated_at TEXT NOT NULL
@@ -197,6 +200,30 @@ class SqliteScheduleDatabase {
       // Drop legacy v3 mixed cache so only temporary activity notifications live in SQLite.
       await db.execute('DROP TABLE IF EXISTS canvas_daily_items');
     }
+
+    if (oldVersion < 5) {
+      await _addScheduleDetailColumnsV5(db);
+    }
+  }
+
+  Future<void> _addScheduleDetailColumnsV5(DatabaseExecutor db) async {
+    final cols = await db.rawQuery('PRAGMA table_info(schedules)');
+    final names = cols.map((row) => row['name'] as String).toSet();
+    if (!names.contains('subject_code')) {
+      await db.execute(
+        "ALTER TABLE schedules ADD COLUMN subject_code TEXT NOT NULL DEFAULT ''",
+      );
+    }
+    if (!names.contains('classroom')) {
+      await db.execute(
+        "ALTER TABLE schedules ADD COLUMN classroom TEXT NOT NULL DEFAULT ''",
+      );
+    }
+    if (!names.contains('teacher_name')) {
+      await db.execute(
+        "ALTER TABLE schedules ADD COLUMN teacher_name TEXT NOT NULL DEFAULT ''",
+      );
+    }
   }
 
   Future<void> close() async {
@@ -238,8 +265,11 @@ class SqliteScheduleDatabase {
       final id = row['id'] as String;
       return SubjectSchedule(
         id: id,
+        subjectCode: (row['subject_code'] as String?) ?? '',
         subject: row['subject'] as String,
         section: row['section'] as String,
+        classroom: (row['classroom'] as String?) ?? '',
+        teacherName: (row['teacher_name'] as String?) ?? '',
         sessions:
             sessionsByScheduleId[id] ?? const <SessionType, SessionSchedule>{},
         reminderMinutesBefore: row['reminder_minutes_before'] as int,
@@ -255,52 +285,83 @@ class SqliteScheduleDatabase {
   }) async {
     final db = await _open();
     await db.transaction((txn) async {
-      await txn.insert(
-        'schedules',
-        <String, Object?>{
-          'id': schedule.id,
-          'subject': schedule.subject,
-          'section': schedule.section,
-          'reminder_minutes_before': schedule.reminderMinutesBefore,
-          'reminder_enabled': schedule.reminderEnabled ? 1 : 0,
-          'updated_at': schedule.updatedAt.toIso8601String(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-
-      await txn.delete(
-        'schedule_sessions',
-        where: 'schedule_id = ?',
-        whereArgs: <Object>[schedule.id],
-      );
-
-      for (final session in schedule.sessions.values) {
-        await txn.insert('schedule_sessions', <String, Object?>{
-          'schedule_id': schedule.id,
-          'session_type': session.type.key,
-          'days_csv': _encodeDays(session.days),
-          'time_in_minutes': session.timeIn.totalMinutes,
-          'time_out_minutes': session.timeOut.totalMinutes,
-        });
-      }
-
-      final sessionSummary = schedule.sessions.values
-          .map(
-            (s) =>
-                '${s.type.label} (${s.formatDaysSummary()} · ${s.formatTimeRange()})',
-          )
-          .join('; ');
-
-      await _insertHistory(
-        txn,
-        action: isNew ? 'schedule_added' : 'schedule_updated',
-        entityType: 'schedule',
-        entityId: schedule.id,
-        title: '${schedule.subject} · Sec ${schedule.section}',
-        details: sessionSummary,
-        snapshotJson: jsonEncode(schedule.toJson()),
-      );
+      await _writeScheduleInTxn(txn, schedule, isNew: isNew);
     });
+  }
+
+  Future<void> upsertSchedulesBatch(List<SubjectSchedule> schedules) async {
+    if (schedules.isEmpty) return;
+    final db = await _open();
+    await db.transaction((txn) async {
+      final existingIds = await _readScheduleIds(txn);
+      for (final schedule in schedules) {
+        final isNew = !existingIds.contains(schedule.id);
+        await _writeScheduleInTxn(txn, schedule, isNew: isNew);
+        existingIds.add(schedule.id);
+      }
+    });
+  }
+
+  Future<void> _writeScheduleInTxn(
+    Transaction txn,
+    SubjectSchedule schedule, {
+    required bool isNew,
+  }) async {
+    await txn.insert(
+      'schedules',
+      <String, Object?>{
+        'id': schedule.id,
+        'subject_code': schedule.subjectCode,
+        'subject': schedule.subject,
+        'section': schedule.section,
+        'classroom': schedule.classroom,
+        'teacher_name': schedule.teacherName,
+        'reminder_minutes_before': schedule.reminderMinutesBefore,
+        'reminder_enabled': schedule.reminderEnabled ? 1 : 0,
+        'updated_at': schedule.updatedAt.toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    await txn.delete(
+      'schedule_sessions',
+      where: 'schedule_id = ?',
+      whereArgs: <Object>[schedule.id],
+    );
+
+    for (final session in schedule.sessions.values) {
+      await txn.insert('schedule_sessions', <String, Object?>{
+        'schedule_id': schedule.id,
+        'session_type': session.type.key,
+        'days_csv': _encodeDays(session.days),
+        'time_in_minutes': session.timeIn.totalMinutes,
+        'time_out_minutes': session.timeOut.totalMinutes,
+      });
+    }
+
+    final metaParts = <String>[
+      if (schedule.hasClassroom) 'Room: ${schedule.classroom}',
+      if (schedule.hasTeacherName) 'Teacher: ${schedule.teacherName}',
+    ];
+    final sessionSummary = schedule.sessions.values
+        .map(
+          (s) =>
+              '${s.type.label} (${s.formatDaysSummary()} · ${s.formatTimeRange()})',
+        )
+        .join('; ');
+    final details = metaParts.isEmpty
+        ? sessionSummary
+        : '${metaParts.join(' · ')} · $sessionSummary';
+
+    await _insertHistory(
+      txn,
+      action: isNew ? 'schedule_added' : 'schedule_updated',
+      entityType: 'schedule',
+      entityId: schedule.id,
+      title: '${schedule.displayTitle} · Sec ${schedule.section}',
+      details: details,
+      snapshotJson: jsonEncode(schedule.toJson()),
+    );
   }
 
   /// Schedules can only be removed via explicit removal from the schedule screen.

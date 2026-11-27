@@ -232,6 +232,9 @@ class _NoopAlarmService implements AlarmService {
   Future<void> openAlarmChannelSettings() async {}
 
   @override
+  Future<void> openCanvasChannelSettings() async {}
+
+  @override
   Future<bool> requestNotificationPermission() async => true;
 
   @override

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../../domain/models/canvas_token_models.dart';
-import '../../../core/app_theme.dart';
 import '../../../core/majestic_chrome.dart';
 import '../view_models/canvas_settings_view_model.dart';
 
@@ -189,20 +188,11 @@ class _CanvasSettingsPageState extends State<CanvasSettingsPage> {
 
         return Scaffold(
           appBar: AppBar(
-            backgroundColor: AppTheme.imperialSapphireDeep,
-            foregroundColor: const Color(0xFFF7F2E4),
-            iconTheme: const IconThemeData(color: Color(0xFFF6E7BE)),
-            title: Row(
+            title: const Row(
               children: <Widget>[
-                const SeiRemindsEmblem(size: 30),
-                const SizedBox(width: 10),
-                Text(
-                  'Canvas Settings',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: const Color(0xFFF7F2E4),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                SeiRemindsEmblem(size: 28),
+                SizedBox(width: 10),
+                Text('Canvas Settings'),
               ],
             ),
           ),

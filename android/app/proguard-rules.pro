@@ -11,3 +11,9 @@
 -dontwarn io.flutter.embedding.**
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn javax.annotation.**
+
+# Optional non-Latin ML Kit text recognizer modules not bundled (SeiReminds uses Latin only).
+-dontwarn com.google.mlkit.vision.text.chinese.**
+-dontwarn com.google.mlkit.vision.text.devanagari.**
+-dontwarn com.google.mlkit.vision.text.japanese.**
+-dontwarn com.google.mlkit.vision.text.korean.**

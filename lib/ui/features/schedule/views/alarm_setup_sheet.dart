@@ -60,7 +60,7 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Silent Vibration Alarm Setup',
+                        'Alarms & Notifications Setup',
                         style: theme.textTheme.titleLarge,
                       ),
                     ),
@@ -73,7 +73,9 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'SeiReminds uses priority heads-up vibration alarms (no audio) with a Stop button right on the notification so you can stop vibrating without opening the app.',
+                  'All SeiReminds alerts bypass Silent Mode and Do Not Disturb while keeping alarms and pop-ups strictly separate:\n'
+                  '• Class Schedules use a repeating vibration alarm with a Stop button.\n'
+                  '• Canvas updates use a brief notification pop-up only (never an alarm).',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -129,25 +131,43 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                     onAction: widget.viewModel.openBatteryOptimizationSettings,
                   ),
                   _PermissionTile(
-                    title: 'Do Not Disturb Override (Optional)',
-                    subtitle: 'Normal Silent/Vibrate is already bypassed; enable this for strict DND.',
+                    title: 'Bypass Do Not Disturb (All Notifications & Alarms)',
+                    subtitle:
+                        'Required by Android so both Class Schedule alarms and Canvas notification pop-ups bypass strict Do Not Disturb and Silent Mode.',
                     granted: status.dndAccessGranted,
-                    actionLabel: 'Settings',
+                    actionLabel: 'Allow',
                     onAction: widget.viewModel.openDndSettings,
                   ),
                   Card(
                     margin: const EdgeInsets.only(bottom: 8),
                     child: ListTile(
                       leading: Icon(
-                        Icons.tune_outlined,
+                        Icons.alarm_outlined,
                         color: theme.colorScheme.primary,
                       ),
-                      title: const Text('Pop-on-Screen Channel Settings'),
+                      title: const Text('Class Alarm Channel Settings'),
                       subtitle: const Text(
-                        'If banners still hide on Xiaomi/Samsung/OPPO/Vivo, open this and make sure Floating / Pop on screen is enabled.',
+                        'Verify Floating / Pop on screen & Override Do Not Disturb for Class Schedule alarms.',
                       ),
                       trailing: TextButton(
                         onPressed: widget.viewModel.openAlarmChannelSettings,
+                        child: const Text('Open'),
+                      ),
+                    ),
+                  ),
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.notifications_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      title: const Text('Canvas Pop-up Channel Settings'),
+                      subtitle: const Text(
+                        'Separate notification pop-up channel for Canvas announcements & activities (bypasses DND without ringing as an alarm).',
+                      ),
+                      trailing: TextButton(
+                        onPressed: widget.viewModel.openCanvasChannelSettings,
                         child: const Text('Open'),
                       ),
                     ),
@@ -167,10 +187,10 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                               }
                             : null,
                         icon: const Icon(Icons.vibration),
-                        label: const Text('Test Vibration Alarm'),
+                        label: const Text('Test Class Alarm'),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     OutlinedButton.icon(
                       onPressed: status.isAndroidSupported
                           ? () async {
@@ -184,6 +204,17 @@ class _AlarmSetupSheetState extends State<AlarmSetupSheet>
                       label: const Text('Stop'),
                     ),
                   ],
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  key: const Key('test_canvas_popup_button'),
+                  onPressed: status.isAndroidSupported
+                      ? () async {
+                          await widget.viewModel.triggerTestCanvasNotification();
+                        }
+                      : null,
+                  icon: const Icon(Icons.notifications_none_rounded),
+                  label: const Text('Test Canvas Pop-up (Not an Alarm)'),
                 ),
                 if (_testTriggered) ...<Widget>[
                   const SizedBox(height: 10),

@@ -133,13 +133,18 @@ class MainActivity : FlutterActivity() {
                                 },
                             )
                         } else {
-                            openAlarmChannelSettings()
+                            openChannelSettings(AlarmPlaybackService.ACTIVE_CHANNEL_ID)
                         }
                         result.success(null)
                     }
 
                     "openAlarmChannelSettings" -> {
-                        openAlarmChannelSettings()
+                        openChannelSettings(AlarmPlaybackService.ACTIVE_CHANNEL_ID)
+                        result.success(null)
+                    }
+
+                    "openCanvasChannelSettings" -> {
+                        openChannelSettings(AlarmPlaybackService.CANVAS_TODAY_CHANNEL_ID)
                         result.success(null)
                     }
 
@@ -184,14 +189,14 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun openAlarmChannelSettings() {
+    private fun openChannelSettings(channelId: String) {
         AlarmPlaybackService.ensureChannels(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
                 startActivity(
                     Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
                         putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                        putExtra(Settings.EXTRA_CHANNEL_ID, AlarmPlaybackService.ACTIVE_CHANNEL_ID)
+                        putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
                     },
                 )
                 return

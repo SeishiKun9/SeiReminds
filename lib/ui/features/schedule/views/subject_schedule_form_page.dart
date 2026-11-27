@@ -40,7 +40,10 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
 
   final _formKey = GlobalKey<FormState>();
   final _sectionFieldKey = GlobalKey<FormFieldState<String>>();
+  late final TextEditingController _subjectCodeController;
   late final TextEditingController _subjectController;
+  late final TextEditingController _classroomController;
+  late final TextEditingController _teacherNameController;
   late final TextEditingController _sectionController;
 
   late Set<int> _selectedDays;
@@ -56,7 +59,16 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
   void initState() {
     super.initState();
     final existing = widget.existingSchedule;
+    _subjectCodeController = TextEditingController(
+      text: existing?.subjectCode ?? '',
+    );
     _subjectController = TextEditingController(text: existing?.subject ?? '');
+    _classroomController = TextEditingController(
+      text: existing?.classroom ?? '',
+    );
+    _teacherNameController = TextEditingController(
+      text: existing?.teacherName ?? '',
+    );
     _sectionController = TextEditingController(text: existing?.section ?? '');
     _selectedDays = existing != null && existing.sharedDays.isNotEmpty
         ? existing.sharedDays.toSet()
@@ -108,7 +120,10 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
 
   @override
   void dispose() {
+    _subjectCodeController.dispose();
     _subjectController.dispose();
+    _classroomController.dispose();
+    _teacherNameController.dispose();
     _sectionController.dispose();
     super.dispose();
   }
@@ -187,8 +202,11 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
     final schedule = SubjectSchedule(
       id: widget.existingSchedule?.id ??
           DateTime.now().microsecondsSinceEpoch.toString(),
+      subjectCode: _subjectCodeController.text.trim(),
       subject: _subjectController.text.trim(),
       section: normalizeSectionLetter(_sectionController.text),
+      classroom: _classroomController.text.trim(),
+      teacherName: _teacherNameController.text.trim(),
       sessions: builtSessions,
       reminderMinutesBefore: _reminderMinutesBefore,
       reminderEnabled: _reminderEnabled,
@@ -212,26 +230,40 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
           children: <Widget>[
-            _SectionHeader(
+            const _SectionHeader(
               step: '1',
-              title: 'Subject',
-              subtitle: 'Choose an existing subject or type a new one.',
+              title: 'Subject, Room & Teacher',
+              subtitle:
+                  'Enter the subject acronym and full name separately, plus classroom and teacher.',
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
+            TextFormField(
+              key: const Key('subject_code_field'),
+              controller: _subjectCodeController,
+              textCapitalization: TextCapitalization.characters,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Subject Acronym / Code',
+                hintText: 'e.g., CS 101, DSA, MATH 1',
+                prefixIcon: Icon(Icons.tag_outlined),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 12),
             TextFormField(
               key: const Key('subject_field'),
               controller: _subjectController,
               textCapitalization: TextCapitalization.words,
               textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
-                labelText: 'Subject Name',
-                hintText: 'e.g., Data Structures, Calculus 1',
+                labelText: 'Subject Full Name',
+                hintText: 'e.g., Data Structures & Algorithms',
                 prefixIcon: Icon(Icons.book_outlined),
               ),
               onChanged: (_) => setState(() {}),
               validator: (value) {
                 if (value == null || value.trim().isEmpty) {
-                  return 'Enter or choose a subject';
+                  return 'Enter the subject full name';
                 }
                 return null;
               },
@@ -253,6 +285,39 @@ class _SubjectScheduleFormPageState extends State<SubjectScheduleFormPage> {
                 }).toList(),
               ),
             ],
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: TextFormField(
+                    key: const Key('classroom_field'),
+                    controller: _classroomController,
+                    textCapitalization: TextCapitalization.words,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Classroom',
+                      hintText: 'e.g., Room 304',
+                      prefixIcon: Icon(Icons.meeting_room_outlined),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextFormField(
+                    key: const Key('teacher_name_field'),
+                    controller: _teacherNameController,
+                    textCapitalization: TextCapitalization.words,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Teacher Name',
+                      hintText: 'e.g., Prof. Santos',
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 20),
             _SectionHeader(
               step: '2',

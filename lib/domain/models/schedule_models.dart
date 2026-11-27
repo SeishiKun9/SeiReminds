@@ -269,14 +269,20 @@ class SessionSchedule {
 class SubjectSchedule {
   SubjectSchedule({
     required this.id,
+    String subjectCode = '',
     required String subject,
     required String section,
+    String classroom = '',
+    String teacherName = '',
     required Map<SessionType, SessionSchedule> sessions,
     this.reminderMinutesBefore = 10,
     this.reminderEnabled = true,
     DateTime? updatedAt,
-  })  : subject = subject.trim(),
+  })  : subjectCode = subjectCode.trim(),
+        subject = subject.trim(),
         section = normalizeSectionLetter(section),
+        classroom = classroom.trim(),
+        teacherName = teacherName.trim(),
         sessions = Map<SessionType, SessionSchedule>.unmodifiable(sessions),
         updatedAt = (updatedAt ?? DateTime.now()).toUtc() {
     if (this.subject.isEmpty) {
@@ -304,12 +310,30 @@ class SubjectSchedule {
   }
 
   final String id;
+
+  /// Optional short subject acronym or course code (e.g., "CS 101", "DSA").
+  final String subjectCode;
+
+  /// Full subject title (e.g., "Data Structures & Algorithms").
   final String subject;
   final String section;
+
+  /// Optional classroom / room label (e.g., "Room 304", "Comp Lab 2").
+  final String classroom;
+
+  /// Optional instructor / teacher name (e.g., "Prof. Maria Santos").
+  final String teacherName;
   final Map<SessionType, SessionSchedule> sessions;
   final int reminderMinutesBefore;
   final bool reminderEnabled;
   final DateTime updatedAt;
+
+  bool get hasSubjectCode => subjectCode.isNotEmpty;
+  bool get hasClassroom => classroom.isNotEmpty;
+  bool get hasTeacherName => teacherName.isNotEmpty;
+
+  String get displayTitle =>
+      subjectCode.isNotEmpty ? '$subjectCode · $subject' : subject;
 
   /// Generalized schedule days shared across this subject's sessions (Mon–Sat).
   List<int> get sharedDays {
@@ -324,8 +348,11 @@ class SubjectSchedule {
 
   SubjectSchedule copyWith({
     String? id,
+    String? subjectCode,
     String? subject,
     String? section,
+    String? classroom,
+    String? teacherName,
     Map<SessionType, SessionSchedule>? sessions,
     int? reminderMinutesBefore,
     bool? reminderEnabled,
@@ -333,8 +360,11 @@ class SubjectSchedule {
   }) {
     return SubjectSchedule(
       id: id ?? this.id,
+      subjectCode: subjectCode ?? this.subjectCode,
       subject: subject ?? this.subject,
       section: section ?? this.section,
+      classroom: classroom ?? this.classroom,
+      teacherName: teacherName ?? this.teacherName,
       sessions: sessions ?? this.sessions,
       reminderMinutesBefore:
           reminderMinutesBefore ?? this.reminderMinutesBefore,
@@ -365,8 +395,11 @@ class SubjectSchedule {
           }
           return SubjectSchedule(
             id: id,
+            subjectCode: (json['subjectCode'] as String?) ?? '',
             subject: subject,
             section: section,
+            classroom: (json['classroom'] as String?) ?? '',
+            teacherName: (json['teacherName'] as String?) ?? '',
             sessions: parsedSessions,
             reminderMinutesBefore: reminderMinutesBefore,
             reminderEnabled: reminderEnabled,
@@ -379,8 +412,11 @@ class SubjectSchedule {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
+        'subjectCode': subjectCode,
         'subject': subject,
         'section': section,
+        'classroom': classroom,
+        'teacherName': teacherName,
         'sessions': sessions.values.map((s) => s.toJson()).toList(),
         'reminderMinutesBefore': reminderMinutesBefore,
         'reminderEnabled': reminderEnabled,
@@ -629,7 +665,7 @@ class DaySessionItem implements Comparable<DaySessionItem> {
   final int weekday;
 
   String get shortSummary =>
-      '${schedule.subject} (Sec ${schedule.section} · ${session.type.shortLabel})';
+      '${schedule.displayTitle} (Sec ${schedule.section} · ${session.type.shortLabel})';
 
   @override
   int compareTo(DaySessionItem other) {
@@ -889,6 +925,12 @@ List<ScheduledAlarmPayload> buildAlarmPayloads(
         final timingPhrase = schedule.reminderMinutesBefore == 0
             ? 'now'
             : 'in ${schedule.reminderMinutesBefore} ${schedule.reminderMinutesBefore == 1 ? 'minute' : 'minutes'}';
+        final metaParts = <String>[
+          if (schedule.hasClassroom) schedule.classroom,
+          if (schedule.hasTeacherName) schedule.teacherName,
+        ];
+        final metaSuffix =
+            metaParts.isEmpty ? '' : ' · ${metaParts.join(' · ')}';
 
         payloads.add(
           ScheduledAlarmPayload(
@@ -897,9 +939,9 @@ List<ScheduledAlarmPayload> buildAlarmPayloads(
             weekday: trigger.weekday,
             hour: trigger.hour,
             minute: trigger.minute,
-            title: '${schedule.subject} · Sec ${schedule.section}',
+            title: '${schedule.displayTitle} · Sec ${schedule.section}',
             body:
-                'Your ${session.type.announcementName} class is starting $timingPhrase · ${session.formatTimeRange()}',
+                'Your ${session.type.announcementName} class is starting $timingPhrase · ${session.formatTimeRange()}$metaSuffix',
             sessionLabel: session.type.label,
           ),
         );

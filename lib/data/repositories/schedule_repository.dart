@@ -185,6 +185,13 @@ class ScheduleRepository {
     return loadAllAndSync();
   }
 
+  Future<ScheduleDataSnapshot> saveSchedules(
+    List<SubjectSchedule> schedules,
+  ) async {
+    await _database.upsertSchedulesBatch(schedules);
+    return loadAllAndSync();
+  }
+
   Future<ScheduleDataSnapshot> deleteSchedule(
     String id, {
     required bool confirmedFromSchedule,
@@ -271,12 +278,23 @@ class ScheduleRepository {
   Future<void> openAlarmChannelSettings() =>
       _alarmService.openAlarmChannelSettings();
 
+  Future<void> openCanvasChannelSettings() =>
+      _alarmService.openCanvasChannelSettings();
+
   Future<void> openDndSettings() => _alarmService.openDndSettings();
 
   Future<void> openBatteryOptimizationSettings() =>
       _alarmService.openBatteryOptimizationSettings();
 
   Future<void> triggerTestAlarm() => _alarmService.triggerTestAlarm();
+
+  Future<void> triggerTestCanvasNotification() =>
+      _alarmService.showCanvasNotification(
+        id: 5001,
+        title: 'Canvas Update · Sample Notice',
+        body:
+            'This is a Canvas notification pop-up (bypasses DND & silent mode with a single buzz — never a class alarm).',
+      );
 
   Future<void> stopActiveAlarm() => _alarmService.stopActiveAlarm();
 

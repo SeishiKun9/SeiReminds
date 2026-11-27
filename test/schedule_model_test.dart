@@ -52,6 +52,9 @@ class _FakeAlarmService implements AlarmService {
   Future<void> openAlarmChannelSettings() async {}
 
   @override
+  Future<void> openCanvasChannelSettings() async {}
+
+  @override
   Future<bool> requestNotificationPermission() async => true;
 
   @override
@@ -847,26 +850,202 @@ void main() {
       },
     );
 
-    test('AlarmPermissionStatus flags missing full-screen pop-up banner access', () {
-      const missingPopUp = AlarmPermissionStatus(
-        isAndroidSupported: true,
-        notificationsGranted: true,
-        exactAlarmsAllowed: true,
-        fullScreenIntentAllowed: false,
-        dndAccessGranted: false,
-        ignoringBatteryOptimizations: true,
-      );
-      expect(missingPopUp.needsAttention, isTrue);
+    test(
+      'AlarmPermissionStatus flags missing full-screen banner or DND bypass access',
+      () {
+        const missingPopUp = AlarmPermissionStatus(
+          isAndroidSupported: true,
+          notificationsGranted: true,
+          exactAlarmsAllowed: true,
+          fullScreenIntentAllowed: false,
+          dndAccessGranted: true,
+          ignoringBatteryOptimizations: true,
+        );
+        expect(missingPopUp.needsAttention, isTrue);
 
-      const ready = AlarmPermissionStatus(
-        isAndroidSupported: true,
-        notificationsGranted: true,
-        exactAlarmsAllowed: true,
-        fullScreenIntentAllowed: true,
-        dndAccessGranted: false,
-        ignoringBatteryOptimizations: true,
-      );
-      expect(ready.needsAttention, isFalse);
-    });
+        const missingDnd = AlarmPermissionStatus(
+          isAndroidSupported: true,
+          notificationsGranted: true,
+          exactAlarmsAllowed: true,
+          fullScreenIntentAllowed: true,
+          dndAccessGranted: false,
+          ignoringBatteryOptimizations: true,
+        );
+        expect(missingDnd.needsAttention, isTrue);
+
+        const ready = AlarmPermissionStatus(
+          isAndroidSupported: true,
+          notificationsGranted: true,
+          exactAlarmsAllowed: true,
+          fullScreenIntentAllowed: true,
+          dndAccessGranted: true,
+          ignoringBatteryOptimizations: true,
+        );
+        expect(ready.needsAttention, isFalse);
+      },
+    );
+
+    test(
+      'migrates SQLite v4 schedules losslessly to v5 with separate subject_code, classroom, and teacher_name columns',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp('seireminds_v5_');
+        final dbPath = p.join(tempDir.path, 'v4.db');
+        try {
+          final v4Db = await databaseFactoryFfi.openDatabase(
+            dbPath,
+            options: OpenDatabaseOptions(
+              version: 4,
+              singleInstance: false,
+              onCreate: (db, version) async {
+                await db.execute('''
+                  CREATE TABLE schedules (
+                    id TEXT PRIMARY KEY,
+                    subject TEXT NOT NULL,
+                    section TEXT NOT NULL,
+                    reminder_minutes_before INTEGER NOT NULL,
+                    reminder_enabled INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                  )
+                ''');
+                await db.execute('''
+                  CREATE TABLE schedule_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    schedule_id TEXT NOT NULL,
+                    session_type TEXT NOT NULL,
+                    days_csv TEXT NOT NULL,
+                    time_in_minutes INTEGER NOT NULL,
+                    time_out_minutes INTEGER NOT NULL
+                  )
+                ''');
+                await db.execute('''
+                  CREATE TABLE events (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    days_csv TEXT NOT NULL,
+                    period TEXT NOT NULL,
+                    morning_time_in INTEGER,
+                    morning_time_out INTEGER,
+                    afternoon_time_in INTEGER,
+                    afternoon_time_out INTEGER,
+                    evening_time_in INTEGER,
+                    reminder_minutes_before INTEGER NOT NULL,
+                    reminder_enabled INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                  )
+                ''');
+                await db.execute('''
+                  CREATE TABLE history_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action TEXT NOT NULL,
+                    entity_type TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    details TEXT NOT NULL,
+                    snapshot_json TEXT,
+                    is_archived INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                  )
+                ''');
+                await db.execute('''
+                  CREATE TABLE app_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                  )
+                ''');
+                await db.execute('''
+                  CREATE TABLE canvas_activities (
+                    item_id TEXT PRIMARY KEY,
+                    course_name TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    posted_at TEXT NOT NULL,
+                    due_at TEXT,
+                    expires_at TEXT NOT NULL,
+                    notified INTEGER NOT NULL DEFAULT 0
+                  )
+                ''');
+              },
+            ),
+          );
+          await v4Db.insert('schedules', <String, Object?>{
+            'id': 'legacy-sched',
+            'subject': 'Linear Algebra',
+            'section': 'A',
+            'reminder_minutes_before': 10,
+            'reminder_enabled': 1,
+            'updated_at': DateTime.utc(2026, 2, 1).toIso8601String(),
+          });
+          await v4Db.insert('schedule_sessions', <String, Object?>{
+            'schedule_id': 'legacy-sched',
+            'session_type': 'lecture',
+            'days_csv': '1,3',
+            'time_in_minutes': 9 * 60,
+            'time_out_minutes': 10 * 60 + 30,
+          });
+          await v4Db.close();
+
+          final upgraded = SqliteScheduleDatabase(
+            databaseFactory: databaseFactoryFfi,
+            databasePath: dbPath,
+          );
+          try {
+            final loaded = await upgraded.loadSchedules();
+            expect(loaded.length, 1);
+            expect(loaded.first.subject, 'Linear Algebra');
+            expect(loaded.first.subjectCode, '');
+            expect(loaded.first.classroom, '');
+            expect(loaded.first.teacherName, '');
+
+            await upgraded.upsertSchedule(
+              SubjectSchedule(
+                id: 'new-v5',
+                subjectCode: 'CS 102',
+                subject: 'Algorithms',
+                section: 'C',
+                classroom: 'Room 210',
+                teacherName: 'Dr. Reyes',
+                sessions: <SessionType, SessionSchedule>{
+                  SessionType.lecture: SessionSchedule(
+                    type: SessionType.lecture,
+                    days: const <int>[DateTime.tuesday],
+                    timeIn: const ScheduleTime(hour: 10, minute: 0),
+                    timeOut: const ScheduleTime(hour: 11, minute: 30),
+                  ),
+                },
+              ),
+              isNew: true,
+            );
+            final all = await upgraded.loadSchedules();
+            final added = all.firstWhere((s) => s.id == 'new-v5');
+            expect(added.subjectCode, 'CS 102');
+            expect(added.subject, 'Algorithms');
+            expect(added.classroom, 'Room 210');
+            expect(added.teacherName, 'Dr. Reyes');
+            expect(added.displayTitle, 'CS 102 · Algorithms');
+          } finally {
+            await upgraded.close();
+          }
+        } finally {
+          await tempDir.delete(recursive: true);
+        }
+      },
+    );
+
+    test(
+      'Canvas test notification stays strictly a pop-up and never modifies class alarms',
+      () async {
+        final db = _createInMemoryDb();
+        final alarmService = _FakeAlarmService();
+        final repo = ScheduleRepository(database: db, alarmService: alarmService);
+        try {
+          await repo.triggerTestCanvasNotification();
+          expect(alarmService.canvasNotifications.length, 1);
+          expect(alarmService.canvasNotifications.first.title, contains('Canvas'));
+          expect(alarmService.lastSynced, isEmpty);
+        } finally {
+          await repo.close();
+        }
+      },
+    );
   });
 }

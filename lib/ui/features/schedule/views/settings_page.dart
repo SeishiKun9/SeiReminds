@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/app_routes.dart';
-import '../../../core/app_theme.dart';
 import '../../../core/majestic_chrome.dart';
 import '../../auth/view_models/auth_view_model.dart';
 import '../../canvas/view_models/canvas_settings_view_model.dart';
@@ -270,20 +269,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
         return Scaffold(
           appBar: AppBar(
-            backgroundColor: AppTheme.imperialSapphireDeep,
-            foregroundColor: const Color(0xFFF7F2E4),
-            iconTheme: const IconThemeData(color: Color(0xFFF6E7BE)),
-            title: Row(
+            title: const Row(
               children: <Widget>[
-                const SeiRemindsEmblem(size: 30),
-                const SizedBox(width: 10),
-                Text(
-                  'Settings & History',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: const Color(0xFFF7F2E4),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                SeiRemindsEmblem(size: 28),
+                SizedBox(width: 10),
+                Text('Settings & History'),
               ],
             ),
           ),
@@ -296,82 +286,71 @@ class _SettingsPageState extends State<SettingsPage> {
                   builder: (context, _) {
                     final authVm = widget.authViewModel!;
                     final user = authVm.currentUser;
-                    return CelestialHorizonBanner(
-                      borderRadius: BorderRadius.circular(16),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
-                      child: Row(
-                        children: <Widget>[
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: AppTheme.burnishedGold
-                                  .withValues(alpha: 0.18),
-                              border: Border.all(
-                                color: AppTheme.burnishedGold
-                                    .withValues(alpha: 0.7),
+                    final cs = theme.colorScheme;
+                    return Card(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                color: cs.primaryContainer,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                user != null
+                                    ? Icons.person_outline
+                                    : Icons.cloud_off_outlined,
+                                color: cs.onPrimaryContainer,
                               ),
                             ),
-                            child: Icon(
-                              user != null
-                                  ? Icons.person_outline
-                                  : Icons.cloud_off_outlined,
-                              color: const Color(0xFFF8DF9E),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Text(
-                                  user?.label ?? 'Offline Mode',
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    color: const Color(0xFFF7F2E4),
-                                    fontWeight: FontWeight.w700,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    user?.label ?? 'Offline Mode',
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  user?.email ??
-                                      'Schedules, events, history & alarms work offline. Sign in for Canvas.',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: const Color(0xFFD5CCB5),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    user?.email ??
+                                        'Schedules, events, history & alarms work offline. Sign in for Canvas.',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          if (user != null)
-                            TextButton.icon(
-                              key: const Key('sign_out_button'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: const Color(0xFFF8DF9E),
+                                ],
                               ),
-                              onPressed: authVm.isBusy ? null : authVm.signOut,
-                              icon: const Icon(Icons.logout, size: 18),
-                              label: const Text('Sign Out'),
-                            )
-                          else
-                            FilledButton.icon(
-                              key: const Key('go_to_sign_in_from_settings'),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.burnishedGold,
-                                foregroundColor: const Color(0xFF141007),
-                              ),
-                              onPressed: () {
-                                Navigator.of(context)
-                                    .pushNamed(AppRoutes.login);
-                              },
-                              icon: const Icon(Icons.login, size: 18),
-                              label: const Text('Sign In'),
                             ),
-                        ],
+                            const SizedBox(width: 8),
+                            if (user != null)
+                              TextButton.icon(
+                                key: const Key('sign_out_button'),
+                                onPressed: authVm.isBusy ? null : authVm.signOut,
+                                icon: const Icon(Icons.logout, size: 18),
+                                label: const Text('Sign Out'),
+                              )
+                            else
+                              FilledButton.icon(
+                                key: const Key('go_to_sign_in_from_settings'),
+                                onPressed: () {
+                                  Navigator.of(context)
+                                      .pushNamed(AppRoutes.login);
+                                },
+                                icon: const Icon(Icons.login, size: 18),
+                                label: const Text('Sign In'),
+                              ),
+                          ],
+                        ),
                       ),
                     );
                   },

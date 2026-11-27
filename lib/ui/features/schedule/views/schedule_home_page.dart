@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../data/services/schedule_ocr_service.dart';
 import '../../../../domain/models/schedule_models.dart';
 import '../../../core/app_routes.dart';
 import '../../../core/app_theme.dart';
@@ -9,6 +10,7 @@ import '../../canvas/view_models/canvas_settings_view_model.dart';
 import '../view_models/schedule_view_model.dart';
 import 'alarm_setup_sheet.dart';
 import 'event_schedule_form_page.dart';
+import 'photo_schedule_import_page.dart';
 import 'subject_schedule_form_page.dart';
 
 class ScheduleHomePage extends StatefulWidget {
@@ -17,11 +19,13 @@ class ScheduleHomePage extends StatefulWidget {
     required this.viewModel,
     this.canvasViewModel,
     this.authViewModel,
+    this.ocrService,
   });
 
   final ScheduleViewModel viewModel;
   final CanvasSettingsViewModel? canvasViewModel;
   final AuthViewModel? authViewModel;
+  final ScheduleOcrService? ocrService;
 
   @override
   State<ScheduleHomePage> createState() => _ScheduleHomePageState();
@@ -69,7 +73,30 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '${result.subject} (Sec ${result.section}) saved in SQLite.',
+          '${result.displayTitle} (Sec ${result.section}) saved in SQLite.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openPhotoImport() async {
+    final imported = await Navigator.of(context).push<List<SubjectSchedule>>(
+      MaterialPageRoute<List<SubjectSchedule>>(
+        builder: (_) => PhotoScheduleImportPage(
+          initialWeekday: widget.viewModel.selectedWeekday,
+          ocrService: widget.ocrService,
+        ),
+      ),
+    );
+
+    if (imported == null || imported.isEmpty) return;
+    final saved = await widget.viewModel.saveSchedules(imported);
+    if (!mounted || !saved) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Imported ${imported.length} ${imported.length == 1 ? 'class' : 'classes'} into your timetable.',
         ),
       ),
     );
@@ -101,7 +128,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
       builder: (context) => AlertDialog(
         title: const Text('Remove from schedule?'),
         content: Text(
-          'Remove ${schedule.subject} (Sec ${schedule.section}) from your timetable and cancel its weekly reminders?',
+          'Remove ${schedule.displayTitle} (Sec ${schedule.section}) from your timetable and cancel its weekly alarms?',
         ),
         actions: <Widget>[
           TextButton(
@@ -193,6 +220,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final listenables = <Listenable>[
       widget.viewModel,
       if (widget.canvasViewModel != null) widget.canvasViewModel!,
@@ -215,14 +243,14 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                   16,
                   MediaQuery.paddingOf(context).top + 10,
                   14,
-                  14,
+                  12,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     Row(
                       children: <Widget>[
-                        const SeiRemindsEmblem(size: 38),
+                        const SeiRemindsEmblem(size: 34),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Row(
@@ -232,9 +260,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                   'SeiReminds',
                                   overflow: TextOverflow.ellipsis,
                                   style: theme.textTheme.titleLarge?.copyWith(
-                                    color: const Color(0xFFF7F2E4),
                                     fontWeight: FontWeight.w700,
-                                    letterSpacing: -0.2,
                                   ),
                                 ),
                               ),
@@ -246,21 +272,14 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                   vertical: 2,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: AppTheme.burnishedGold
-                                      .withValues(alpha: 0.18),
+                                  color: cs.primaryContainer,
                                   borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: AppTheme.burnishedGold
-                                        .withValues(alpha: 0.65),
-                                    width: 1,
-                                  ),
                                 ),
                                 child: Text(
                                   'v1.2-beta.1',
                                   style: theme.textTheme.labelSmall?.copyWith(
-                                    color: const Color(0xFFF8DF9E),
+                                    color: cs.onPrimaryContainer,
                                     fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.3,
                                   ),
                                 ),
                               ),
@@ -275,19 +294,19 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                             icon: Badge(
                               key: const Key('open_canvas_hub_button'),
                               isLabelVisible: vm.canvasActivities.isNotEmpty,
-                              backgroundColor: AppTheme.burnishedGold,
-                              textColor: const Color(0xFF141007),
+                              backgroundColor: cs.primary,
+                              textColor: cs.onPrimary,
                               label: Text('${vm.canvasActivities.length}'),
                               child: const Icon(Icons.school_outlined, size: 20),
                             ),
                           ),
                         RoyalHeaderIconButton(
-                          tooltip: 'Alarm & Silent-Bypass Setup',
+                          tooltip: 'Alarms & DND Setup',
                           onPressed: _openAlarmSetup,
                           icon: Badge(
                             key: const Key('alarm_setup_button'),
                             isLabelVisible: vm.permissionStatus.needsAttention,
-                            backgroundColor: const Color(0xFFF47C84),
+                            backgroundColor: cs.error,
                             child: const Icon(
                               Icons.notifications_active_outlined,
                               size: 20,
@@ -305,7 +324,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                         ),
                       ],
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 12),
                     _WeekdayStrip(
                       selectedWeekday: vm.selectedWeekday,
                       countForDay: vm.subjectCountForDay,
@@ -324,7 +343,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                             _AlertStrip(
                               icon: Icons.warning_amber_rounded,
                               message:
-                                  'Grant alarm permissions so vibration reminders fire on time while unused.',
+                                  'Grant alarm & DND bypass permissions so notifications fire reliably in Silent Mode & DND.',
                               actionLabel: 'Setup',
                               onAction: _openAlarmSetup,
                             ),
@@ -336,7 +355,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                               onAction: vm.clearBanner,
                             ),
                           Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                             child: Row(
                               children: <Widget>[
                                 Expanded(
@@ -356,8 +375,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                         '${daySubjects.length} ${daySubjects.length == 1 ? 'subject' : 'subjects'} · ${dayEvents.length} ${dayEvents.length == 1 ? 'event' : 'events'} · ${vm.totalActiveAlarmCount} alarms',
                                         style: AppTheme.tabularStyle(
                                           theme.textTheme.bodySmall?.copyWith(
-                                            color: theme
-                                                .colorScheme.onSurfaceVariant,
+                                            color: cs.onSurfaceVariant,
                                           ),
                                         ),
                                       ),
@@ -365,14 +383,35 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                   ),
                                 ),
                                 OutlinedButton.icon(
+                                  key: const Key('import_photo_button'),
+                                  onPressed: _openPhotoImport,
+                                  icon: const Icon(
+                                    Icons.document_scanner_outlined,
+                                    size: 17,
+                                  ),
+                                  label: const Text('Scan'),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 11,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                OutlinedButton.icon(
                                   key: const Key('add_event_button'),
                                   onPressed: () => _openEventForm(),
-                                  icon: Icon(
-                                    Icons.campaign_outlined,
-                                    size: 18,
-                                    color: AppTheme.goldAccent(theme.brightness),
+                                  icon: const Icon(
+                                    Icons.event_outlined,
+                                    size: 17,
                                   ),
                                   label: const Text('Add Event'),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 11,
+                                      vertical: 10,
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
@@ -385,9 +424,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                       child: Text(
                                         vm.errorMessage!,
                                         textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          color: theme.colorScheme.error,
-                                        ),
+                                        style: TextStyle(color: cs.error),
                                       ),
                                     ),
                                   )
@@ -395,6 +432,7 @@ class _ScheduleHomePageState extends State<ScheduleHomePage>
                                 ? _EmptyDayView(
                                     weekday: vm.selectedWeekday,
                                     onAddPressed: () => _openClassForm(),
+                                    onImportPhotoPressed: _openPhotoImport,
                                   )
                                 : ListView(
                                     padding: const EdgeInsets.fromLTRB(
@@ -541,7 +579,7 @@ class _EventAnnouncementCard extends StatelessWidget {
                           : 'EVENT · ${event.title}',
                       style: theme.textTheme.titleSmall?.copyWith(
                         color: fg,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -614,6 +652,7 @@ class _WeekdayStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Row(
       children: kSchoolWeekdays.map((day) {
         final selected = day == selectedWeekday;
@@ -630,31 +669,18 @@ class _WeekdayStrip extends StatelessWidget {
               child: InkWell(
                 key: Key('weekday_tab_$day'),
                 onTap: () => onSelect(day),
-                borderRadius: BorderRadius.circular(13),
+                borderRadius: BorderRadius.circular(12),
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
+                  duration: const Duration(milliseconds: 180),
                   curve: Curves.easeOutCubic,
-                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
                   decoration: BoxDecoration(
-                    color: selected
-                        ? AppTheme.burnishedGold
-                        : const Color(0x1AF5EFE0),
-                    borderRadius: BorderRadius.circular(13),
+                    color: selected ? cs.primary : cs.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: selected
-                          ? const Color(0xFFFBE6AE)
-                          : AppTheme.burnishedGold.withValues(alpha: 0.24),
-                      width: selected ? 1.3 : 1.0,
+                      color: selected ? cs.primary : cs.outlineVariant,
+                      width: 1,
                     ),
-                    boxShadow: selected
-                        ? const <BoxShadow>[
-                            BoxShadow(
-                              color: Color(0x38E8BE65),
-                              blurRadius: 12,
-                              offset: Offset(0, 4),
-                            ),
-                          ]
-                        : null,
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -666,11 +692,8 @@ class _WeekdayStrip extends StatelessWidget {
                             weekdayShortLabel(day),
                             style: TextStyle(
                               fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.2,
-                              color: selected
-                                  ? const Color(0xFF141007)
-                                  : const Color(0xFFF2E8D0),
+                              fontWeight: FontWeight.w700,
+                              color: selected ? cs.onPrimary : cs.onSurface,
                             ),
                           ),
                           if (hasEvent) ...<Widget>[
@@ -680,15 +703,13 @@ class _WeekdayStrip extends StatelessWidget {
                               height: 6,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: selected
-                                    ? const Color(0xFF7D161E)
-                                    : const Color(0xFFF47C84),
+                                color: selected ? cs.onPrimary : cs.error,
                               ),
                             ),
                           ],
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 6,
@@ -696,8 +717,8 @@ class _WeekdayStrip extends StatelessWidget {
                         ),
                         decoration: BoxDecoration(
                           color: selected
-                              ? const Color(0x24141007)
-                              : const Color(0x28000000),
+                              ? cs.onPrimary.withValues(alpha: 0.2)
+                              : cs.surfaceContainerHigh,
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
@@ -707,8 +728,8 @@ class _WeekdayStrip extends StatelessWidget {
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                               color: selected
-                                  ? const Color(0xFF141007)
-                                  : const Color(0xFFD6C8A5),
+                                  ? cs.onPrimary
+                                  : cs.onSurfaceVariant,
                             ),
                           ),
                         ),
@@ -750,16 +771,15 @@ class _SubjectDayCard extends StatelessWidget {
     final schedule = group.schedule;
     final allCanceled = group.sessions
         .every((s) => conflictingEventsForSession(s).isNotEmpty);
-    final borderColor = allCanceled
-        ? cs.error.withValues(alpha: 0.55)
-        : AppTheme.goldHairline(theme.brightness);
+    final borderColor =
+        allCanceled ? cs.error.withValues(alpha: 0.55) : cs.outlineVariant;
 
     return Card(
       key: Key('subject_card_${schedule.id}'),
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: borderColor, width: 1.1),
+        side: BorderSide(color: borderColor, width: 1),
       ),
       child: InkWell(
         onTap: onTap,
@@ -775,46 +795,109 @@ class _SubjectDayCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Row(
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: <Widget>[
-                            Expanded(
-                              child: Text(
-                                schedule.subject,
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  decoration: allCanceled
-                                      ? TextDecoration.lineThrough
-                                      : null,
+                            if (schedule.hasSubjectCode)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: cs.primaryContainer,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  schedule.subjectCode,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: cs.onPrimaryContainer,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 9,
-                                vertical: 3,
+                                horizontal: 8,
+                                vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: cs.primaryContainer,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: AppTheme.goldHairline(theme.brightness)
-                                      .withValues(alpha: 0.7),
-                                ),
+                                color: cs.surfaceContainerHigh,
+                                borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 'Sec ${schedule.section}',
                                 style: theme.textTheme.labelSmall?.copyWith(
-                                  color: cs.onPrimaryContainer,
-                                  fontWeight: FontWeight.w800,
+                                  color: cs.onSurfaceVariant,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
                             ),
                           ],
                         ),
+                        const SizedBox(height: 5),
+                        Text(
+                          schedule.subject,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            decoration: allCanceled
+                                ? TextDecoration.lineThrough
+                                : null,
+                          ),
+                        ),
+                        if (schedule.hasClassroom ||
+                            schedule.hasTeacherName) ...<Widget>[
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 4,
+                            children: <Widget>[
+                              if (schedule.hasClassroom)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: <Widget>[
+                                    Icon(
+                                      Icons.meeting_room_outlined,
+                                      size: 14,
+                                      color: cs.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      schedule.classroom,
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        color: cs.onSurfaceVariant,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              if (schedule.hasTeacherName)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: <Widget>[
+                                    Icon(
+                                      Icons.person_outline,
+                                      size: 14,
+                                      color: cs.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      schedule.teacherName,
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        color: cs.onSurfaceVariant,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ],
                         const SizedBox(height: 3),
                         Text(
-                          '${schedule.formatSharedDaysSummary()} · Tap to view Online, Lecture & Lab',
+                          schedule.formatSharedDaysSummary(),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: cs.onSurfaceVariant,
                           ),
@@ -886,11 +969,8 @@ class _SubjectDayCard extends StatelessWidget {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: sessionAccent.withValues(alpha: 0.13),
+                          color: sessionAccent.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: sessionAccent.withValues(alpha: 0.32),
-                          ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -955,14 +1035,14 @@ class _SubjectDayCard extends StatelessWidget {
                           : Icons.notifications_off_outlined,
                       size: 14,
                       color: schedule.reminderEnabled
-                          ? AppTheme.goldAccent(theme.brightness)
+                          ? cs.primary
                           : cs.onSurfaceVariant,
                     ),
                     const SizedBox(width: 5),
                     Text(
                       schedule.reminderEnabled
-                          ? 'Vibrate ${formatReminderLead(schedule.reminderMinutesBefore)}'
-                          : 'Muted',
+                          ? 'Class alarm · ${formatReminderLead(schedule.reminderMinutesBefore)}'
+                          : 'Alarm muted',
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: cs.onSurfaceVariant,
                       ),
@@ -1010,15 +1090,36 @@ class _SubjectDetailSheet extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
+                      if (schedule.hasSubjectCode) ...<Widget>[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: cs.primaryContainer,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            schedule.subjectCode,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: cs.onPrimaryContainer,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                      ],
                       Text(
                         schedule.subject,
                         style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -1028,22 +1129,65 @@ class _SubjectDetailSheet extends StatelessWidget {
                           color: cs.onSurfaceVariant,
                         ),
                       ),
+                      if (schedule.hasClassroom ||
+                          schedule.hasTeacherName) ...<Widget>[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 14,
+                          runSpacing: 6,
+                          children: <Widget>[
+                            if (schedule.hasClassroom)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  Icon(
+                                    Icons.meeting_room_outlined,
+                                    size: 16,
+                                    color: cs.primary,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    schedule.classroom,
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                ],
+                              ),
+                            if (schedule.hasTeacherName)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  Icon(
+                                    Icons.person_outline,
+                                    size: 16,
+                                    color: cs.primary,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    schedule.teacherName,
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                ],
+                              ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: cs.primaryContainer,
+                    color: cs.surfaceContainerHigh,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     'Sec ${schedule.section}',
                     style: theme.textTheme.labelMedium?.copyWith(
-                      color: cs.onPrimaryContainer,
+                      color: cs.onSurfaceVariant,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -1121,7 +1265,7 @@ class _SubjectDetailSheet extends StatelessWidget {
                 Expanded(
                   child: Text(
                     schedule.reminderEnabled
-                        ? 'Silent vibration alarm · ${formatReminderLead(schedule.reminderMinutesBefore)} (no audio, vibrates until Stop)'
+                        ? 'Class vibration alarm · ${formatReminderLead(schedule.reminderMinutesBefore)} (bypasses Silent & DND until Stop)'
                         : 'Vibration alarm muted',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: cs.onSurfaceVariant,
@@ -1169,10 +1313,15 @@ class _SubjectDetailSheet extends StatelessWidget {
 }
 
 class _EmptyDayView extends StatelessWidget {
-  const _EmptyDayView({required this.weekday, required this.onAddPressed});
+  const _EmptyDayView({
+    required this.weekday,
+    required this.onAddPressed,
+    required this.onImportPhotoPressed,
+  });
 
   final int weekday;
   final VoidCallback onAddPressed;
+  final VoidCallback onImportPhotoPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -1185,8 +1334,8 @@ class _EmptyDayView extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const SeiRemindsEmblem(size: 72, showGlow: true),
-              const GildedRule(verticalMargin: 16),
+              const SeiRemindsEmblem(size: 64),
+              const SizedBox(height: 16),
               Text(
                 'No classes on ${weekdayFullLabel(weekday)}',
                 textAlign: TextAlign.center,
@@ -1196,17 +1345,29 @@ class _EmptyDayView extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Add a subject with Section A–Z and Online Time, Lecture, or Laboratory times.',
+                'Add a subject manually or scan a photo of your class schedule to auto-fill it offline.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: 20),
-              FilledButton.icon(
-                onPressed: onAddPressed,
-                icon: const Icon(Icons.add),
-                label: Text('Add for ${weekdayShortLabel(weekday)}'),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 10,
+                runSpacing: 10,
+                children: <Widget>[
+                  FilledButton.icon(
+                    onPressed: onAddPressed,
+                    icon: const Icon(Icons.add),
+                    label: Text('Add for ${weekdayShortLabel(weekday)}'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onImportPhotoPressed,
+                    icon: const Icon(Icons.document_scanner_outlined, size: 18),
+                    label: const Text('Import Photo'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1233,7 +1394,7 @@ class _AlertStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 2),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: colorScheme.errorContainer,
@@ -1290,65 +1451,73 @@ class _NextClassSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return CelestialHorizonBanner(
+    final cs = theme.colorScheme;
+    final meta = <String>[
+      item.session.type.label,
+      item.session.formatTimeRange(),
+      if (item.schedule.hasClassroom) item.schedule.classroom,
+    ].join(' · ');
+
+    return Card(
       key: const Key('next_class_card'),
-      borderRadius: BorderRadius.circular(16),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppTheme.burnishedGold.withValues(alpha: 0.18),
-              border: Border.all(
-                color: AppTheme.burnishedGold.withValues(alpha: 0.75),
-                width: 1.3,
+      color: cs.primaryContainer,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: cs.primary.withValues(alpha: 0.25)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: cs.primary,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                isInProgress ? Icons.play_arrow_rounded : Icons.schedule,
+                size: 22,
+                color: cs.onPrimary,
               ),
             ),
-            child: Icon(
-              isInProgress ? Icons.play_arrow_rounded : Icons.schedule,
-              size: 22,
-              color: const Color(0xFFF8DF9E),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  '${isInProgress ? 'NOW' : 'UP NEXT'} · ${_formatLead()}',
-                  style: AppTheme.tabularStyle(
-                    theme.textTheme.labelSmall?.copyWith(
-                      color: AppTheme.burnishedGold,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '${isInProgress ? 'NOW' : 'UP NEXT'} · ${_formatLead()}',
+                    style: AppTheme.tabularStyle(
+                      theme.textTheme.labelSmall?.copyWith(
+                        color: cs.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${item.schedule.subject} · Sec ${item.schedule.section}',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: const Color(0xFFF7F2E4),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${item.session.type.label} · ${item.session.formatTimeRange()}',
-                  style: AppTheme.tabularStyle(
-                    theme.textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFFD5CCB5),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${item.schedule.displayTitle} · Sec ${item.schedule.section}',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: cs.onPrimaryContainer,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(
+                    meta,
+                    style: AppTheme.tabularStyle(
+                      theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onPrimaryContainer.withValues(alpha: 0.85),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

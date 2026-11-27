@@ -61,6 +61,9 @@ class _RecordingAlarmService implements AlarmService {
   Future<void> openAlarmChannelSettings() async {}
 
   @override
+  Future<void> openCanvasChannelSettings() async {}
+
+  @override
   Future<bool> requestNotificationPermission() async => true;
 }
 
@@ -103,8 +106,20 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(
+        find.byKey(const Key('subject_code_field')),
+        'CS 101',
+      );
+      await tester.enterText(
         find.byKey(const Key('subject_field')),
         'Data Structures',
+      );
+      await tester.enterText(
+        find.byKey(const Key('classroom_field')),
+        'Room 304',
+      );
+      await tester.enterText(
+        find.byKey(const Key('teacher_name_field')),
+        'Prof. Santos',
       );
       await tester.pump();
 
@@ -129,9 +144,11 @@ void main() {
       );
       await tester.scrollUntilVisible(
         wedSharedDayChip,
-        200,
+        120,
         scrollable: formScrollable,
       );
+      await tester.ensureVisible(wedSharedDayChip);
+      await tester.pumpAndSettle();
       await tester.tap(wedSharedDayChip);
       await tester.pumpAndSettle();
 
@@ -156,14 +173,20 @@ void main() {
       await tester.tap(find.byKey(const Key('save_schedule_button')));
       await tester.pumpAndSettle();
 
-      // ONE unified subject card on Monday showing Online Time, Lecture, and Laboratory together!
+      // ONE unified subject card on Monday showing separate Acronym, Full Name, Room, Teacher, and sessions!
+      expect(find.text('CS 101'), findsOneWidget);
       expect(find.text('Data Structures'), findsOneWidget);
+      expect(find.text('Room 304'), findsOneWidget);
+      expect(find.text('Prof. Santos'), findsOneWidget);
       expect(find.text('Sec B'), findsOneWidget);
       expect(find.text('Online Time'), findsOneWidget);
       expect(find.text('Lecture'), findsOneWidget);
       expect(find.text('Laboratory'), findsOneWidget);
       // 3 sessions x 2 generalized days (Mon, Wed) = 6 alarms.
       expect(alarmService.syncedAlarms.length, 6);
+      expect(alarmService.syncedAlarms.first.title, 'CS 101 · Data Structures · Sec B');
+      expect(alarmService.syncedAlarms.first.body, contains('Room 304'));
+      expect(alarmService.syncedAlarms.first.body, contains('Prof. Santos'));
 
       // Tapping the subject opens the detail sheet displaying Online, Lecture, and Laboratory together.
       await tester.tap(find.text('Data Structures'));

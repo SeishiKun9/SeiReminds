@@ -12,7 +12,8 @@ SeiReminds is an independent, unofficial student class scheduler and reminder ap
 
 All core scheduling features operate completely offline and stay strictly on your device inside a local SQLite database (`seireminds.db`):
 
-- **Class Schedules & School Events:** Subjects, sections, days, times, and reminder preferences.
+- **Class Schedules & School Events:** Subject acronyms/codes, full subject names, sections, classrooms, teacher names, days, times, and reminder preferences.
+- **Schedule Photo Import (On-Device OCR):** Photos picked or taken to auto-schedule classes are scanned 100% on-device using offline OCR; images are never uploaded to any server.
 - **Settings & History Logs:** Local edit history and your History visibility preference.
 - **Temporary Canvas Activities:** Only Canvas activity/assignment reminders are cached temporarily in SQLite until their deadline (`due_at`) expires, after which they are automatically deleted. Canvas announcements are kept in memory for the current day only and are **never** stored in SQLite.
 - **Canvas API Token (Encrypted):** If you choose to connect Canvas while signed in and online, your personal Canvas API token is stored strictly on-device in hardware-backed Android Keystore encryption (`flutter_secure_storage`). It is **never** stored in plain-text SQLite, **never** logged, **never** displayed in full after saving, and excluded from Android cloud backups and device-to-device transfers.

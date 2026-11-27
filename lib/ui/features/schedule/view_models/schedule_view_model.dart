@@ -284,6 +284,20 @@ class ScheduleViewModel extends ChangeNotifier {
     }
   }
 
+  Future<bool> saveSchedules(List<SubjectSchedule> schedules) async {
+    if (schedules.isEmpty) return false;
+    try {
+      final snapshot = await _repository.saveSchedules(schedules);
+      _applySnapshot(snapshot);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _bannerMessage = 'Failed to import schedules: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> deleteScheduleFromScheduleScreen(String id) async {
     try {
       final snapshot = await _repository.deleteSchedule(
@@ -417,12 +431,18 @@ class ScheduleViewModel extends ChangeNotifier {
   Future<void> openAlarmChannelSettings() =>
       _repository.openAlarmChannelSettings();
 
+  Future<void> openCanvasChannelSettings() =>
+      _repository.openCanvasChannelSettings();
+
   Future<void> openDndSettings() => _repository.openDndSettings();
 
   Future<void> openBatteryOptimizationSettings() =>
       _repository.openBatteryOptimizationSettings();
 
   Future<void> triggerTestAlarm() => _repository.triggerTestAlarm();
+
+  Future<void> triggerTestCanvasNotification() =>
+      _repository.triggerTestCanvasNotification();
 
   Future<void> stopActiveAlarm() => _repository.stopActiveAlarm();
 }
